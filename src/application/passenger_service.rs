@@ -38,8 +38,18 @@ impl<C: Clock> PassengerService<C> {
         name: String,
         tier: Tier,
     ) -> Result<Passenger, DomainError> {
-        let _ = (actor, &id, &name, tier);
-        todo!("PS-R1: implement create")
+        require_crew_lead(actor)?;
+        if self.active.iter().any(|p| p.id == id) {
+            return Err(DomainError::PassengerAlreadyExists);
+        }
+        let p = Passenger {
+            id,
+            name,
+            tier,
+            deleted_at: None,
+        };
+        self.active.push(p.clone());
+        Ok(p)
     }
 
     /// PS-R3/R4 — Crew-Lead-only tier change. Idempotent.
@@ -53,8 +63,14 @@ impl<C: Clock> PassengerService<C> {
         id: &PassengerId,
         new_tier: Tier,
     ) -> Result<(), DomainError> {
-        let _ = (actor, id, new_tier);
-        todo!("PS-R3: implement change_tier")
+        require_crew_lead(actor)?;
+        let slot = self
+            .active
+            .iter_mut()
+            .find(|p| p.id == *id)
+            .ok_or(DomainError::PassengerNotFound)?;
+        slot.tier = new_tier;
+        Ok(())
     }
 
     /// PS-R5 — soft delete (Crew-Lead-only). Stamps `deleted_at` from
@@ -64,8 +80,16 @@ impl<C: Clock> PassengerService<C> {
     /// - `UnauthorizedActor` (PS-E1).
     /// - `PassengerNotFound` (PS-E3).
     pub fn soft_delete(&mut self, actor: &Actor, id: &PassengerId) -> Result<(), DomainError> {
-        let _ = (actor, id);
-        todo!("PS-R5: implement soft_delete")
+        require_crew_lead(actor)?;
+        let pos = self
+            .active
+            .iter()
+            .position(|p| p.id == *id)
+            .ok_or(DomainError::PassengerNotFound)?;
+        let mut p = self.active.remove(pos);
+        p.deleted_at = Some(self.clock.now());
+        self.deleted.push(p);
+        Ok(())
     }
 
     /// PS-R8 — active passengers in insertion order.
@@ -80,7 +104,14 @@ impl<C: Clock> PassengerService<C> {
     /// # Errors
     /// `PassengerNotFound` (PS-E3) if no record exists.
     pub fn get(&self, id: &PassengerId) -> Result<&Passenger, DomainError> {
-        let _ = id;
-        todo!("PS-R9: implement get")
+        if let Some(p) = self.active.iter().find(|p| p.id == *id) {
+            return Ok(p);
+        }
+        // Fall back to the most recently soft-deleted record matching id.
+        self.deleted
+            .iter()
+            .rev()
+            .find(|p| p.id == *id)
+            .ok_or(DomainError::PassengerNotFound)
     }
 }
