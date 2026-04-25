@@ -131,6 +131,20 @@ export const api = {
   byTier: () => call<ApiTierCount[]>("/reports/by-tier"),
   topResources: (n: number) =>
     call<ApiTopResource[]>(`/reports/top-resources?n=${n}`),
+  history: (passengerId: string) =>
+    call<ApiUsageEvent[]>(
+      `/reports/history/${encodeURIComponent(passengerId)}`,
+    ),
+
+  replaceCrewLead: (
+    actorId: string,
+    oldId: string,
+    newLead: ApiCrewLead,
+  ): Promise<Result<void>> =>
+    call<void>(`/crew-leads/${encodeURIComponent(oldId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ actor_id: actorId, new_lead: newLead }),
+    }),
 
   useResource: (passengerId: string, resourceId: string) =>
     call<ApiUsageEvent>("/access", {
