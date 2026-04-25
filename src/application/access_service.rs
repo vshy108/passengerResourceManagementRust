@@ -6,9 +6,8 @@ use crate::application::resource_service::ResourceService;
 use crate::domain::actor::Actor;
 use crate::domain::errors::DomainError;
 use crate::domain::resource::ResourceId;
-use crate::domain::usage_event::UsageEvent;
+use crate::domain::usage_event::{Outcome, UsageEvent};
 
-#[allow(dead_code)] // fields are populated and used once GREEN lands
 pub struct AccessService<C: Clock, S: UsageEventSink> {
     clock: C,
     sink: S,
@@ -45,7 +44,45 @@ impl<C: Clock, S: UsageEventSink> AccessService<C, S> {
         resources: &ResourceService<RC>,
         resource_id: &ResourceId,
     ) -> Result<UsageEvent, DomainError> {
-        let _ = (actor, passengers, resources, resource_id);
-        todo!("AC-R1..R7: implement use_resource")
+        // AC-R1.
+        let Actor::Passenger(passenger_id) = actor else {
+            return Err(DomainError::UnauthorizedActor);
+        };
+        // AC-R2 — only active passengers can attempt access.
+        let passenger = passengers
+            .list()
+            .iter()
+            .find(|p| p.id == *passenger_id)
+            .ok_or(DomainError::PassengerNotFound)?;
+        // AC-R3 — only active resources are valid targets.
+        let resource = resources
+            .list()
+            .iter()
+            .find(|r| r.id == *resource_id)
+            .ok_or(DomainError::ResourceNotFound)?;
+
+        // AC-R4 / AC-R5 / AC-R7 — emit event before returning.
+        let allowed = passenger.tier.can_access(resource.min_tier);
+        let event = UsageEvent {
+            id: self.next_event_id,
+            passenger_id: passenger.id.clone(),
+            resource_id: resource.id.clone(),
+            tier_at_attempt: passenger.tier,
+            min_tier_at_attempt: resource.min_tier,
+            timestamp: self.clock.now(),
+            outcome: if allowed {
+                Outcome::Allowed
+            } else {
+                Outcome::Denied
+            },
+        };
+        self.next_event_id += 1;
+        self.sink.append(event.clone());
+
+        if allowed {
+            Ok(event)
+        } else {
+            Err(DomainError::AccessDenied)
+        }
     }
 }

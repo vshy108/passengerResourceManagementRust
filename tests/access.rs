@@ -39,10 +39,7 @@ fn world_with_clock_starting_at(start: i64) -> World {
     World {
         passengers: PassengerService::new(FakeClock::default()),
         resources: ResourceService::new(FakeClock::default()),
-        access: AccessService::new(
-            FakeClock::starting_at(start),
-            InMemoryUsageEventSink::new(),
-        ),
+        access: AccessService::new(FakeClock::starting_at(start), InMemoryUsageEventSink::new()),
     }
 }
 
@@ -71,9 +68,12 @@ fn ac_s1_crew_lead_actor_unauthorized_no_event() {
     let mut w = world();
     seed_passenger(&mut w, "p1", Tier::Silver);
     seed_resource(&mut w, "r1", Tier::Silver);
-    let res =
-        w.access
-            .use_resource(&admin(), &w.passengers, &w.resources, &ResourceId::from("r1"));
+    let res = w.access.use_resource(
+        &admin(),
+        &w.passengers,
+        &w.resources,
+        &ResourceId::from("r1"),
+    );
     assert_eq!(res.err(), Some(DomainError::UnauthorizedActor));
     assert!(w.access.sink().list().is_empty());
 }
@@ -153,7 +153,12 @@ fn ac_s6_platinum_on_silver_allowed_emits_one_allowed_event() {
     seed_resource(&mut w, "r1", Tier::Silver);
     let ev = w
         .access
-        .use_resource(&pa("p1"), &w.passengers, &w.resources, &ResourceId::from("r1"))
+        .use_resource(
+            &pa("p1"),
+            &w.passengers,
+            &w.resources,
+            &ResourceId::from("r1"),
+        )
         .expect("AC-S6");
     assert_eq!(ev.outcome, Outcome::Allowed);
     assert_eq!(w.access.sink().list().len(), 1);
@@ -165,9 +170,12 @@ fn ac_s7_silver_on_gold_denied_emits_one_denied_event() {
     let mut w = world();
     seed_passenger(&mut w, "p1", Tier::Silver);
     seed_resource(&mut w, "r1", Tier::Gold);
-    let res =
-        w.access
-            .use_resource(&pa("p1"), &w.passengers, &w.resources, &ResourceId::from("r1"));
+    let res = w.access.use_resource(
+        &pa("p1"),
+        &w.passengers,
+        &w.resources,
+        &ResourceId::from("r1"),
+    );
     assert_eq!(res.err(), Some(DomainError::AccessDenied));
     assert_eq!(w.access.sink().list().len(), 1);
     assert_eq!(w.access.sink().list()[0].outcome, Outcome::Denied);
@@ -181,7 +189,12 @@ fn ac_s8_snapshot_tier_at_attempt_not_rewritten_on_later_upgrade() {
     seed_passenger(&mut w, "p1", Tier::Silver);
     seed_resource(&mut w, "r1", Tier::Silver);
     w.access
-        .use_resource(&pa("p1"), &w.passengers, &w.resources, &ResourceId::from("r1"))
+        .use_resource(
+            &pa("p1"),
+            &w.passengers,
+            &w.resources,
+            &ResourceId::from("r1"),
+        )
         .unwrap();
     w.passengers
         .change_tier(&admin(), &PassengerId::from("p1"), Tier::Platinum)
@@ -194,15 +207,23 @@ fn ac_s9_old_denied_stays_denied_after_upgrade() {
     let mut w = world();
     seed_passenger(&mut w, "p1", Tier::Silver);
     seed_resource(&mut w, "r1", Tier::Gold);
-    let _ =
-        w.access
-            .use_resource(&pa("p1"), &w.passengers, &w.resources, &ResourceId::from("r1"));
+    let _ = w.access.use_resource(
+        &pa("p1"),
+        &w.passengers,
+        &w.resources,
+        &ResourceId::from("r1"),
+    );
     w.passengers
         .change_tier(&admin(), &PassengerId::from("p1"), Tier::Gold)
         .unwrap();
     let later = w
         .access
-        .use_resource(&pa("p1"), &w.passengers, &w.resources, &ResourceId::from("r1"))
+        .use_resource(
+            &pa("p1"),
+            &w.passengers,
+            &w.resources,
+            &ResourceId::from("r1"),
+        )
         .expect("upgrade should allow");
     assert_eq!(later.outcome, Outcome::Allowed);
     assert_eq!(w.access.sink().list().len(), 2);
@@ -219,7 +240,12 @@ fn ac_s10_uses_injected_clock_for_timestamp() {
     seed_resource(&mut w, "r1", Tier::Silver);
     let ev = w
         .access
-        .use_resource(&pa("p1"), &w.passengers, &w.resources, &ResourceId::from("r1"))
+        .use_resource(
+            &pa("p1"),
+            &w.passengers,
+            &w.resources,
+            &ResourceId::from("r1"),
+        )
         .unwrap();
     assert_eq!(ev.timestamp.0, 42);
 }
