@@ -30,4 +30,16 @@ pub enum DomainError {
     /// CL-E5.
     #[error("crew lead bootstrap invalid")]
     CrewLeadBootstrapInvalid,
+
+    /// PS-E1 / RS-E1 / AC-E1 — actor lacked permission for the operation.
+    #[error("unauthorized actor")]
+    UnauthorizedActor,
+
+    /// PS-E2.
+    #[error("passenger already exists")]
+    PassengerAlreadyExists,
+
+    /// PS-E3.
+    #[error("passenger not found")]
+    PassengerNotFound,
 }
