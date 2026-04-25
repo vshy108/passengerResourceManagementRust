@@ -3,7 +3,7 @@
 use crate::domain::tier::Tier;
 use crate::domain::timestamp::Timestamp;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ResourceId(pub String);
 
 impl From<&str> for ResourceId {
