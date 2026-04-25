@@ -2,9 +2,7 @@
 
 use passenger_resource_management::application::access_service::AccessService;
 use passenger_resource_management::application::passenger_service::PassengerService;
-use passenger_resource_management::application::reporting_service::{
-    ReportingService, TierCounts,
-};
+use passenger_resource_management::application::reporting_service::{ReportingService, TierCounts};
 use passenger_resource_management::application::resource_service::ResourceService;
 use passenger_resource_management::domain::actor::Actor;
 use passenger_resource_management::domain::crew_lead::CrewLeadId;
@@ -43,13 +41,7 @@ fn seed_passenger(w: &mut World, id: &str, t: Tier) {
 
 fn seed_resource(w: &mut World, id: &str, t: Tier) {
     w.resources
-        .create(
-            &admin(),
-            ResourceId::from(id),
-            id.into(),
-            "g".into(),
-            t,
-        )
+        .create(&admin(), ResourceId::from(id), id.into(), "g".into(), t)
         .unwrap();
 }
 
@@ -100,7 +92,10 @@ fn rp_s3_personal_history_excludes_other_passengers() {
     let rep = ReportingService::new(w.access.sink());
     let hist = rep.personal_history(&PassengerId::from("p1"));
     assert_eq!(hist.len(), 2);
-    assert!(hist.iter().all(|e| e.passenger_id == PassengerId::from("p1")));
+    assert!(
+        hist.iter()
+            .all(|e| e.passenger_id == PassengerId::from("p1"))
+    );
 }
 
 // -- RP-S4..S6 (aggregate by tier) ------------------------------------
@@ -177,10 +172,7 @@ fn rp_s7_top_resources_returns_top_n_by_allowed_count() {
     let top = rep.top_resources(2);
     assert_eq!(
         top,
-        vec![
-            (ResourceId::from("r1"), 3),
-            (ResourceId::from("r3"), 2),
-        ]
+        vec![(ResourceId::from("r1"), 3), (ResourceId::from("r3"), 2),]
     );
 }
 
@@ -210,10 +202,7 @@ fn rp_s9_top_resources_ties_broken_by_resource_id_ascending() {
     let top = rep.top_resources(2);
     assert_eq!(
         top,
-        vec![
-            (ResourceId::from("ra"), 1),
-            (ResourceId::from("rb"), 1),
-        ]
+        vec![(ResourceId::from("ra"), 1), (ResourceId::from("rb"), 1),]
     );
 }
 
