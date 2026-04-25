@@ -76,6 +76,32 @@ Endpoint surface lives in [`src/interface/http.rs`](./src/interface/http.rs)
 and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
 CORS is open by default so the React demo can call it directly.
 
+| Method | Path                              | Purpose                              |
+| ------ | --------------------------------- | ------------------------------------ |
+| GET    | `/health`                         | liveness probe                       |
+| GET    | `/crew-leads`                     | list crew leads                      |
+| POST   | `/crew-leads`                     | add crew lead (always 409, capped)   |
+| PUT    | `/crew-leads/:old_id`             | replace crew lead                    |
+| DELETE | `/crew-leads/:id`                 | remove crew lead (409 if at minimum) |
+| GET    | `/passengers`                     | list active passengers               |
+| POST   | `/passengers`                     | create passenger                     |
+| GET    | `/passengers/:id`                 | fetch one (incl. deleted)            |
+| PATCH  | `/passengers/:id/tier`            | change tier                          |
+| DELETE | `/passengers/:id`                 | soft-delete                          |
+| GET    | `/resources`                      | list active resources                |
+| POST   | `/resources`                      | create resource                      |
+| GET    | `/resources/accessible?tier=…`    | filter by tier                       |
+| GET    | `/resources/:id`                  | fetch one                            |
+| PATCH  | `/resources/:id/min-tier`         | change min tier                      |
+| DELETE | `/resources/:id`                  | soft-delete                          |
+| POST   | `/access`                         | attempt access                       |
+| GET    | `/usage`                          | usage event log                      |
+| GET    | `/audit`                          | admin event log                      |
+| GET    | `/reports/by-tier`                | passenger count per tier             |
+| GET    | `/reports/top-resources?n=…`      | top-N resources by allowed access    |
+| GET    | `/reports/history/:passenger_id`  | personal history                     |
+| POST   | `/reset`                          | reset world to seeded state          |
+
 ## Tooling
 
 - Rust 2024, stable channel pinned in [`rust-toolchain.toml`](./rust-toolchain.toml)
