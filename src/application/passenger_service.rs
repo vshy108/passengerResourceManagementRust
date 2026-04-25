@@ -3,6 +3,8 @@
 use crate::application::guards::require_crew_lead;
 use crate::application::ports::{AdminEventSink, Clock};
 use crate::domain::actor::Actor;
+use crate::domain::admin_event::{AdminAction, AdminEvent, TargetKind};
+use crate::domain::crew_lead::CrewLeadId;
 use crate::domain::errors::DomainError;
 use crate::domain::passenger::{Passenger, PassengerId};
 use crate::domain::tier::Tier;
@@ -14,7 +16,6 @@ pub struct PassengerService<C: Clock> {
     deleted: Vec<Passenger>,
     clock: C,
     audit: Option<Box<dyn AdminEventSink>>,
-    #[allow(dead_code)] // populated and used in GREEN.
     next_audit_id: u64,
 }
 
@@ -61,6 +62,12 @@ impl<C: Clock> PassengerService<C> {
             deleted_at: None,
         };
         self.active.push(p.clone());
+        self.emit(
+            actor,
+            AdminAction::PassengerCreated,
+            p.id.0.clone(),
+            Some(format!("tier={tier:?}")),
+        );
         Ok(p)
     }
 
@@ -82,6 +89,12 @@ impl<C: Clock> PassengerService<C> {
             .find(|p| p.id == *id)
             .ok_or(DomainError::PassengerNotFound)?;
         slot.tier = new_tier;
+        self.emit(
+            actor,
+            AdminAction::PassengerTierChanged,
+            id.0.clone(),
+            Some(format!("tier={new_tier:?}")),
+        );
         Ok(())
     }
 
@@ -101,6 +114,7 @@ impl<C: Clock> PassengerService<C> {
         let mut p = self.active.remove(pos);
         p.deleted_at = Some(self.clock.now());
         self.deleted.push(p);
+        self.emit(actor, AdminAction::PassengerDeleted, id.0.clone(), None);
         Ok(())
     }
 
@@ -125,5 +139,33 @@ impl<C: Clock> PassengerService<C> {
             .rev()
             .find(|p| p.id == *id)
             .ok_or(DomainError::PassengerNotFound)
+    }
+
+    /// Emit an audit event when a sink is configured. The actor is
+    /// assumed to already have been validated as a Crew Lead.
+    fn emit(
+        &mut self,
+        actor: &Actor,
+        action: AdminAction,
+        target_id: String,
+        details: Option<String>,
+    ) {
+        let Some(sink) = self.audit.as_mut() else {
+            return;
+        };
+        let Actor::CrewLead(actor_id) = actor else {
+            return;
+        };
+        let event = AdminEvent {
+            id: self.next_audit_id,
+            actor_id: CrewLeadId(actor_id.0.clone()),
+            action,
+            target_kind: TargetKind::Passenger,
+            target_id,
+            timestamp: self.clock.now(),
+            details,
+        };
+        self.next_audit_id += 1;
+        sink.append(event);
     }
 }

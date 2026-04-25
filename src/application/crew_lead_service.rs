@@ -1,6 +1,7 @@
 //! Crew Lead application service. See `specs/02-crew-lead.md` (CL).
 
 use crate::application::ports::{AdminEventSink, Clock};
+use crate::domain::admin_event::{AdminAction, AdminEvent, TargetKind};
 use crate::domain::crew_lead::{CrewLead, CrewLeadId};
 use crate::domain::errors::DomainError;
 
@@ -12,7 +13,6 @@ pub struct CrewLeadService {
     audit: Option<AuditCfg>,
 }
 
-#[allow(dead_code)] // fields populated and used in GREEN.
 struct AuditCfg {
     clock: Box<dyn Clock>,
     sink: Box<dyn AdminEventSink>,
@@ -87,32 +87,69 @@ impl CrewLeadService {
         &self.leads
     }
 
-    /// AU-S7 — audit-aware bootstrap. Stub for RED phase: does NOT emit
-    /// any event yet.
+    /// AU-S7 — audit-aware bootstrap. Emits one
+    /// `AdminAction::CrewLeadBootstrapped` event on success. The actor
+    /// id is taken from the first lead in the input list.
+    ///
+    /// # Errors
+    /// See [`bootstrap`].
     pub fn bootstrap_audited(
         leads: Vec<CrewLead>,
         clock: Box<dyn Clock>,
         sink: Box<dyn AdminEventSink>,
     ) -> Result<Self, DomainError> {
         let mut svc = Self::bootstrap(leads)?;
-        svc.audit = Some(AuditCfg {
+        let mut audit = AuditCfg {
             clock,
             sink,
             next_id: 1,
-        });
+        };
+        // Use the first lead as the acting Crew Lead for the bootstrap
+        // event; this is a synthetic but stable choice (AU-R2 only
+        // requires `actor_id` be a Crew Lead id).
+        let actor_id = svc.leads[0].id.clone();
+        let target_id = actor_id.0.clone();
+        let event = AdminEvent {
+            id: audit.next_id,
+            actor_id,
+            action: AdminAction::CrewLeadBootstrapped,
+            target_kind: TargetKind::CrewLead,
+            target_id,
+            timestamp: audit.clock.now(),
+            details: Some(format!("count={}", svc.leads.len())),
+        };
+        audit.next_id += 1;
+        audit.sink.append(event);
+        svc.audit = Some(audit);
         Ok(svc)
     }
 
-    /// AU-S8 — audit-aware replace. Stub for RED phase: emits no event.
+    /// AU-S8 — audit-aware replace. Emits one
+    /// `AdminAction::CrewLeadReplaced` event on success.
     ///
     /// # Errors
-    /// See `replace`.
+    /// See [`replace`].
     pub fn replace_audited(
         &mut self,
-        _actor_id: &CrewLeadId,
+        actor_id: &CrewLeadId,
         old_id: &CrewLeadId,
         new_lead: CrewLead,
     ) -> Result<(), DomainError> {
-        self.replace(old_id, new_lead)
+        let new_id = new_lead.id.clone();
+        self.replace(old_id, new_lead)?;
+        if let Some(audit) = self.audit.as_mut() {
+            let event = AdminEvent {
+                id: audit.next_id,
+                actor_id: actor_id.clone(),
+                action: AdminAction::CrewLeadReplaced,
+                target_kind: TargetKind::CrewLead,
+                target_id: new_id.0,
+                timestamp: audit.clock.now(),
+                details: Some(format!("replaced={}", old_id.0)),
+            };
+            audit.next_id += 1;
+            audit.sink.append(event);
+        }
+        Ok(())
     }
 }
