@@ -10,3 +10,4 @@ pub mod passenger;
 pub mod resource;
 pub mod tier;
 pub mod timestamp;
+pub mod usage_event;
