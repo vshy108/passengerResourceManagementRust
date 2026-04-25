@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { passengerId } from "../domain/ids";
 import { ALL_TIERS } from "../domain/tier";
-import { useStore } from "../state/store";
+import { useStore } from "../state/useStore";
 import { TierTag } from "./TierTag";
 
 export function ReportsPanel(): JSX.Element {

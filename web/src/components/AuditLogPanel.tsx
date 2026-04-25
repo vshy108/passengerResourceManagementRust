@@ -1,4 +1,4 @@
-import { useStore } from "../state/store";
+import { useStore } from "../state/useStore";
 
 export function AuditLogPanel(): JSX.Element {
   const { world } = useStore();
