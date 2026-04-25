@@ -54,3 +54,18 @@ that would expand scope per `AGENTS.md` §8). To keep this demo
 zero-backend the services are reimplemented in TypeScript against the
 same specs. The Rust test suite (`cargo test`) is the source of truth;
 this UI is a visual cross-check.
+
+## Live Rust server (optional)
+
+The bottom panel ("Live Rust server (HTTP)") talks to the optional axum
+adapter. Start it from the repo root in a second terminal:
+
+```bash
+cargo run --features http --bin serve
+# → PRMS HTTP server listening on http://127.0.0.1:8080
+```
+
+The panel auto-pings `GET /health`, then loads passengers, resources,
+usage events and the by-tier report from the running server. The
+"POST /access" button drives the live `AccessService`. Override the
+base URL with `VITE_API_BASE=http://host:port npm run dev`.
