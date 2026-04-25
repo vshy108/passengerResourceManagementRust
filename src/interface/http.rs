@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, patch, post, put},
@@ -74,6 +74,8 @@ pub fn router(state: AppState) -> Router {
         // admin
         .route("/reset", post(reset_world))
         .with_state(state)
+        // 64 KiB body cap — every request DTO in this app is tiny.
+        .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(cors)
 }
 
