@@ -1,6 +1,7 @@
 // Mirrors src/domain/errors.rs (#[non_exhaustive] DomainError).
 export type DomainError =
   | "UnauthorizedActor"
+  | "AccessDenied"
   | "PassengerNotFound"
   | "PassengerAlreadyExists"
   | "ResourceNotFound"
@@ -9,7 +10,10 @@ export type DomainError =
   | "CrewLeadAlreadyExists"
   | "CrewLeadLimitReached"
   | "CrewLeadMinimumBreached"
-  | "CrewLeadBootstrapInvalid";
+  | "CrewLeadBootstrapInvalid"
+  // Surface for transport / unexpected errors from the HTTP client.
+  | "NetworkError"
+  | "Unknown";
 
 // Result mirrors std::result::Result<T, DomainError>.
 export type Ok<T> = { ok: true; value: T };

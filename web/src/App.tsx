@@ -1,6 +1,7 @@
 import { AccessPanel } from "./components/AccessPanel";
 import { AuditLogPanel } from "./components/AuditLogPanel";
 import { CrewLeadsPanel } from "./components/CrewLeadsPanel";
+import { LiveServerPanel } from "./components/LiveServerPanel";
 import { PassengersPanel } from "./components/PassengersPanel";
 import { ReportsPanel } from "./components/ReportsPanel";
 import { ResourcesPanel } from "./components/ResourcesPanel";
@@ -37,6 +38,7 @@ export function App(): JSX.Element {
         <AccessPanel />
         <ReportsPanel />
         <AuditLogPanel />
+        <LiveServerPanel />
       </main>
       <footer>
         See <code>AGENTS.md</code> and <code>specs/</code> for the canonical rules. Tests in
