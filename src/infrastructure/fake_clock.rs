@@ -1,23 +1,24 @@
 //! Deterministic clock for tests. Returns timestamps from a
 //! caller-supplied sequence so assertions stay reproducible.
 
-use std::cell::Cell;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::application::ports::Clock;
 use crate::domain::timestamp::Timestamp;
 
 /// Increments by 1 ns on every call to `now`, starting from `start`.
 /// Cheap, deterministic, and good enough for ordering assertions in
-/// integration tests.
+/// integration tests. Backed by `AtomicI64` so it is `Send + Sync`
+/// and reusable from the HTTP server adapter.
 pub struct FakeClock {
-    next: Cell<i64>,
+    next: AtomicI64,
 }
 
 impl FakeClock {
     #[must_use]
     pub fn starting_at(start: i64) -> Self {
         Self {
-            next: Cell::new(start),
+            next: AtomicI64::new(start),
         }
     }
 }
@@ -30,8 +31,9 @@ impl Default for FakeClock {
 
 impl Clock for FakeClock {
     fn now(&self) -> Timestamp {
-        let t = self.next.get();
-        self.next.set(t + 1);
-        Timestamp(t)
+        // Relaxed is sufficient: we only need a unique increasing
+        // sequence per clock; we make no claims about ordering across
+        // separate clock instances.
+        Timestamp(self.next.fetch_add(1, Ordering::Relaxed))
     }
 }

@@ -1,17 +1,17 @@
 //! In-memory append-only sink for `AdminEvent`s.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use crate::application::ports::AdminEventSink;
 use crate::domain::admin_event::AdminEvent;
 
 /// Shared, cloneable in-memory sink. Cloning yields another handle on
 /// the same underlying buffer, so tests can keep one handle and pass
-/// another into a service.
+/// another into a service. Backed by `Arc<Mutex<…>>` so it is also
+/// `Send + Sync` and usable from the HTTP server adapter.
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryAdminEventSink {
-    inner: Rc<RefCell<Vec<AdminEvent>>>,
+    inner: Arc<Mutex<Vec<AdminEvent>>>,
 }
 
 impl InMemoryAdminEventSink {
@@ -21,25 +21,41 @@ impl InMemoryAdminEventSink {
     }
 
     /// Snapshot the events recorded so far.
+    ///
+    /// # Panics
+    /// Panics if the inner mutex is poisoned. The infrastructure layer
+    /// is the only place panics on poisoned mutexes are tolerated
+    /// (AGENTS.md §3) — a poisoned mutex means another thread panicked
+    /// while writing, which is unrecoverable for an audit sink.
     #[must_use]
     pub fn snapshot(&self) -> Vec<AdminEvent> {
-        self.inner.borrow().clone()
+        self.inner.lock().expect("admin sink mutex poisoned").clone()
     }
 
+    /// # Panics
+    /// See [`snapshot`].
     #[must_use]
     pub fn len(&self) -> usize {
-        self.inner.borrow().len()
+        self.inner.lock().expect("admin sink mutex poisoned").len()
     }
 
+    /// # Panics
+    /// See [`snapshot`].
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.inner.borrow().is_empty()
+        self.inner
+            .lock()
+            .expect("admin sink mutex poisoned")
+            .is_empty()
     }
 }
 
 impl AdminEventSink for InMemoryAdminEventSink {
     fn append(&mut self, event: AdminEvent) {
-        self.inner.borrow_mut().push(event);
+        self.inner
+            .lock()
+            .expect("admin sink mutex poisoned")
+            .push(event);
     }
 }
 
