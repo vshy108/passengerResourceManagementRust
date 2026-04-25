@@ -38,6 +38,12 @@ export function App(): JSX.Element {
         <AccessPanel />
         <ReportsPanel />
         <AuditLogPanel />
+        <p className="muted">
+          The panels above run a TypeScript port of the rules entirely in the
+          browser. The panel below talks to the Rust <code>serve</code> binary
+          over HTTP — the two keep <em>independent</em> state, so changes in
+          one will not show up in the other.
+        </p>
         <LiveServerPanel />
       </main>
       <footer>
