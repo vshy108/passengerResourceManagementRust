@@ -790,3 +790,24 @@ async fn get_resource_returns_404_for_unknown() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["code"], "ResourceNotFound");
 }
+
+#[tokio::test]
+async fn oversized_body_is_rejected_with_413() {
+    let app = app();
+    // > 64 KiB
+    let huge = "x".repeat(70 * 1024);
+    let body = serde_json::json!({
+        "actor_id": ARIA,
+        "id": "ps-x",
+        "name": huge,
+        "tier": "Silver"
+    });
+    let r = Request::builder()
+        .method(Method::POST)
+        .uri("/passengers")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let res = app.clone().oneshot(r).await.unwrap();
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
