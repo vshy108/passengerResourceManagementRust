@@ -12,7 +12,7 @@ use crate::domain::usage_event::{Outcome, UsageEvent};
 
 // ---------- tier --------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 pub enum TierDto {
     Silver,
     Gold,
@@ -41,7 +41,7 @@ impl From<TierDto> for Tier {
 
 // ---------- crew lead ---------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CrewLeadDto {
     pub id: String,
@@ -66,7 +66,7 @@ impl From<CrewLeadDto> for CrewLead {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReplaceCrewLeadReq {
     pub actor_id: String,
@@ -75,7 +75,7 @@ pub struct ReplaceCrewLeadReq {
 
 // ---------- passenger ---------------------------------------------------
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct PassengerDto {
     pub id: String,
     pub name: String,
@@ -94,7 +94,7 @@ impl From<&Passenger> for PassengerDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreatePassengerReq {
     pub actor_id: String,
@@ -103,14 +103,14 @@ pub struct CreatePassengerReq {
     pub tier: TierDto,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChangeTierReq {
     pub actor_id: String,
     pub tier: TierDto,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ActorOnlyReq {
     pub actor_id: String,
@@ -118,7 +118,7 @@ pub struct ActorOnlyReq {
 
 // ---------- resource ----------------------------------------------------
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ResourceDto {
     pub id: String,
     pub name: String,
@@ -139,7 +139,7 @@ impl From<&Resource> for ResourceDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateResourceReq {
     pub actor_id: String,
@@ -151,14 +151,14 @@ pub struct CreateResourceReq {
 
 // ---------- access ------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UseResourceReq {
     pub passenger_id: String,
     pub resource_id: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct UsageEventDto {
     pub id: u64,
     pub passenger_id: String,
@@ -169,7 +169,7 @@ pub struct UsageEventDto {
     pub outcome: OutcomeDto,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, utoipa::ToSchema)]
 pub enum OutcomeDto {
     Allowed,
     Denied,
@@ -200,7 +200,7 @@ impl From<&UsageEvent> for UsageEventDto {
 
 // ---------- admin event -------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct AdminEventDto {
     pub id: u64,
     pub actor_id: String,
@@ -250,36 +250,36 @@ fn target_kind_str(k: TargetKind) -> &'static str {
 
 // ---------- reports -----------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TierCountsDto {
     pub tier: TierDto,
     pub allowed: u64,
     pub denied: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TopResourceDto {
     pub resource_id: String,
     pub allowed_count: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct TopNQuery {
     pub n: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct AccessibleQuery {
     pub tier: TierDto,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AddCrewLeadReq {
     pub lead: CrewLeadDto,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoveCrewLeadReq {
     pub actor_id: String,
@@ -287,7 +287,7 @@ pub struct RemoveCrewLeadReq {
 
 // ---------- error envelope ----------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ErrorBody {
     pub error: String,
     pub code: String,

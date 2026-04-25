@@ -1,16 +1,25 @@
 //! HTTP adapter: thin axum handlers translating between DTOs and the
 //! application services. No business logic lives here.
 
+// `utoipa`'s `#[derive(OpenApi)]` expansion uses `for_each` on a slice
+// iterator, which clippy::pedantic flags as `needless_for_each`. The
+// expansion is out of our control, so we silence the lint at module
+// scope rather than per-item (the attribute does not propagate into
+// derive-generated tokens).
+#![allow(clippy::needless_for_each)]
+
 use std::sync::{Arc, Mutex};
 
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, Query, State},
-    http::StatusCode,
+    http::{HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, patch, post, put},
 };
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use utoipa::OpenApi;
 
 use crate::domain::actor::Actor;
 use crate::domain::crew_lead::CrewLeadId;
@@ -21,23 +30,48 @@ use crate::domain::tier::Tier;
 use crate::interface::composition_root::{World, build_demo_world};
 use crate::interface::dto::{
     AccessibleQuery, ActorOnlyReq, AddCrewLeadReq, AdminEventDto, ChangeTierReq,
-    CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, PassengerDto, RemoveCrewLeadReq,
-    ReplaceCrewLeadReq, ResourceDto, TierCountsDto, TierDto, TopNQuery, TopResourceDto,
-    UsageEventDto, UseResourceReq,
+    CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, OutcomeDto, PassengerDto,
+    RemoveCrewLeadReq, ReplaceCrewLeadReq, ResourceDto, TierCountsDto, TierDto, TopNQuery,
+    TopResourceDto, UsageEventDto, UseResourceReq,
 };
 
 /// Shared state held by every handler.
 pub type AppState = Arc<Mutex<World>>;
 
+/// CORS origin policy. `Any` accepts any origin (dev/demo default);
+/// `List` accepts only the listed origins (production-style).
+#[derive(Debug, Clone, Default)]
+pub enum CorsOrigins {
+    #[default]
+    Any,
+    List(Vec<HeaderValue>),
+}
+
 /// Build the axum router with CORS and the full PRMS endpoint surface.
+///
+/// Equivalent to [`router_with`] using `CorsOrigins::Any`.
 pub fn router(state: AppState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    router_with(state, CorsOrigins::Any)
+}
+
+/// Build the axum router with explicit CORS configuration.
+pub fn router_with(state: AppState, cors_origins: CorsOrigins) -> Router {
+    let cors = match cors_origins {
+        CorsOrigins::Any => CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any),
+        CorsOrigins::List(origins) => CorsLayer::new()
+            .allow_origin(origins)
+            .allow_methods(Any)
+            .allow_headers(Any),
+    };
+
+    let x_request_id = HeaderName::from_static("x-request-id");
 
     Router::new()
         .route("/health", get(health))
+        .route("/openapi.json", get(openapi_json))
         // crew leads
         .route("/crew-leads", get(list_crew_leads).post(add_crew_lead))
         .route(
@@ -77,6 +111,10 @@ pub fn router(state: AppState) -> Router {
         // 64 KiB body cap — every request DTO in this app is tiny.
         .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(cors)
+        // Request-id: assign a UUID if the client did not send one,
+        // then propagate it back on the response so logs can correlate.
+        .layer(PropagateRequestIdLayer::new(x_request_id.clone()))
+        .layer(SetRequestIdLayer::new(x_request_id, MakeRequestUuid))
 }
 
 // ---------- error mapping ----------------------------------------------
@@ -124,15 +162,26 @@ fn lock_world(state: &AppState) -> std::sync::MutexGuard<'_, World> {
 
 // ---------- handlers ---------------------------------------------------
 
+#[utoipa::path(get, path = "/health", tag = "system",
+    responses((status = 200, description = "Server is up", body = String)))]
 async fn health() -> &'static str {
     "ok"
 }
 
+#[utoipa::path(get, path = "/crew-leads", tag = "crew-leads",
+    responses((status = 200, description = "All crew leads", body = Vec<CrewLeadDto>)))]
 async fn list_crew_leads(State(state): State<AppState>) -> Json<Vec<CrewLeadDto>> {
     let w = lock_world(&state);
     Json(w.crew_leads.list().iter().map(CrewLeadDto::from).collect())
 }
 
+#[utoipa::path(put, path = "/crew-leads/{old_id}", tag = "crew-leads",
+    params(("old_id" = String, Path, description = "Crew lead ID being replaced")),
+    request_body = ReplaceCrewLeadReq,
+    responses(
+        (status = 204, description = "Replaced"),
+        (status = 404, body = ErrorBody),
+        (status = 403, body = ErrorBody)))]
 async fn replace_crew_lead(
     State(state): State<AppState>,
     Path(old_id): Path<String>,
@@ -149,11 +198,18 @@ async fn replace_crew_lead(
     }
 }
 
+#[utoipa::path(get, path = "/passengers", tag = "passengers",
+    responses((status = 200, body = Vec<PassengerDto>)))]
 async fn list_passengers(State(state): State<AppState>) -> Json<Vec<PassengerDto>> {
     let w = lock_world(&state);
     Json(w.passengers.list().iter().map(PassengerDto::from).collect())
 }
 
+#[utoipa::path(post, path = "/passengers", tag = "passengers",
+    request_body = CreatePassengerReq,
+    responses(
+        (status = 201, body = PassengerDto),
+        (status = 409, body = ErrorBody)))]
 async fn create_passenger(
     State(state): State<AppState>,
     Json(req): Json<CreatePassengerReq>,
@@ -169,6 +225,10 @@ async fn create_passenger(
     }
 }
 
+#[utoipa::path(patch, path = "/passengers/{id}/tier", tag = "passengers",
+    params(("id" = String, Path)),
+    request_body = ChangeTierReq,
+    responses((status = 204), (status = 404, body = ErrorBody)))]
 async fn change_passenger_tier(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -185,6 +245,10 @@ async fn change_passenger_tier(
     }
 }
 
+#[utoipa::path(delete, path = "/passengers/{id}", tag = "passengers",
+    params(("id" = String, Path)),
+    request_body = ActorOnlyReq,
+    responses((status = 204), (status = 404, body = ErrorBody)))]
 async fn soft_delete_passenger(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -198,11 +262,18 @@ async fn soft_delete_passenger(
     }
 }
 
+#[utoipa::path(get, path = "/resources", tag = "resources",
+    responses((status = 200, body = Vec<ResourceDto>)))]
 async fn list_resources(State(state): State<AppState>) -> Json<Vec<ResourceDto>> {
     let w = lock_world(&state);
     Json(w.resources.list().iter().map(ResourceDto::from).collect())
 }
 
+#[utoipa::path(post, path = "/resources", tag = "resources",
+    request_body = CreateResourceReq,
+    responses(
+        (status = 201, body = ResourceDto),
+        (status = 409, body = ErrorBody)))]
 async fn create_resource(
     State(state): State<AppState>,
     Json(req): Json<CreateResourceReq>,
@@ -221,6 +292,10 @@ async fn create_resource(
     }
 }
 
+#[utoipa::path(patch, path = "/resources/{id}/min-tier", tag = "resources",
+    params(("id" = String, Path)),
+    request_body = ChangeTierReq,
+    responses((status = 204), (status = 404, body = ErrorBody)))]
 async fn change_resource_min_tier(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -237,6 +312,10 @@ async fn change_resource_min_tier(
     }
 }
 
+#[utoipa::path(delete, path = "/resources/{id}", tag = "resources",
+    params(("id" = String, Path)),
+    request_body = ActorOnlyReq,
+    responses((status = 204), (status = 404, body = ErrorBody)))]
 async fn soft_delete_resource(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -250,6 +329,11 @@ async fn soft_delete_resource(
     }
 }
 
+#[utoipa::path(post, path = "/access", tag = "access",
+    request_body = UseResourceReq,
+    responses(
+        (status = 200, body = UsageEventDto),
+        (status = 403, body = ErrorBody)))]
 async fn use_resource(State(state): State<AppState>, Json(req): Json<UseResourceReq>) -> Response {
     let mut w = lock_world(&state);
     let actor = Actor::Passenger(PassengerId(req.passenger_id));
@@ -265,6 +349,8 @@ async fn use_resource(State(state): State<AppState>, Json(req): Json<UseResource
     }
 }
 
+#[utoipa::path(get, path = "/audit", tag = "audit",
+    responses((status = 200, body = Vec<AdminEventDto>)))]
 async fn list_admin_events(State(state): State<AppState>) -> Json<Vec<AdminEventDto>> {
     let w = lock_world(&state);
     Json(
@@ -276,6 +362,8 @@ async fn list_admin_events(State(state): State<AppState>) -> Json<Vec<AdminEvent
     )
 }
 
+#[utoipa::path(get, path = "/usage", tag = "audit",
+    responses((status = 200, body = Vec<UsageEventDto>)))]
 async fn list_usage_events(State(state): State<AppState>) -> Json<Vec<UsageEventDto>> {
     use crate::application::ports::UsageEventSource;
     let w = lock_world(&state);
@@ -289,6 +377,8 @@ async fn list_usage_events(State(state): State<AppState>) -> Json<Vec<UsageEvent
     )
 }
 
+#[utoipa::path(get, path = "/reports/by-tier", tag = "reports",
+    responses((status = 200, body = Vec<TierCountsDto>)))]
 async fn report_by_tier(State(state): State<AppState>) -> Json<Vec<TierCountsDto>> {
     use crate::application::reporting_service::ReportingService;
     let w = lock_world(&state);
@@ -310,6 +400,9 @@ async fn report_by_tier(State(state): State<AppState>) -> Json<Vec<TierCountsDto
     Json(rows)
 }
 
+#[utoipa::path(get, path = "/reports/top-resources", tag = "reports",
+    params(TopNQuery),
+    responses((status = 200, body = Vec<TopResourceDto>)))]
 async fn report_top_resources(
     State(state): State<AppState>,
     Query(q): Query<TopNQuery>,
@@ -329,6 +422,9 @@ async fn report_top_resources(
     )
 }
 
+#[utoipa::path(get, path = "/reports/history/{passenger_id}", tag = "reports",
+    params(("passenger_id" = String, Path)),
+    responses((status = 200, body = Vec<UsageEventDto>)))]
 async fn report_personal_history(
     State(state): State<AppState>,
     Path(passenger_id): Path<String>,
@@ -346,6 +442,11 @@ async fn report_personal_history(
 
 // ---------- new endpoints ---------------------------------------------
 
+#[utoipa::path(post, path = "/crew-leads", tag = "crew-leads",
+    request_body = AddCrewLeadReq,
+    responses(
+        (status = 204),
+        (status = 409, body = ErrorBody)))]
 async fn add_crew_lead(State(state): State<AppState>, Json(req): Json<AddCrewLeadReq>) -> Response {
     let mut w = lock_world(&state);
     // CL-R2 — always 409 (`CrewLeadLimitReached`) by design.
@@ -355,6 +456,12 @@ async fn add_crew_lead(State(state): State<AppState>, Json(req): Json<AddCrewLea
     }
 }
 
+#[utoipa::path(delete, path = "/crew-leads/{id}", tag = "crew-leads",
+    params(("id" = String, Path)),
+    request_body = RemoveCrewLeadReq,
+    responses(
+        (status = 204),
+        (status = 409, body = ErrorBody)))]
 async fn remove_crew_lead(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -368,6 +475,9 @@ async fn remove_crew_lead(
     }
 }
 
+#[utoipa::path(get, path = "/passengers/{id}", tag = "passengers",
+    params(("id" = String, Path)),
+    responses((status = 200, body = PassengerDto), (status = 404, body = ErrorBody)))]
 async fn get_passenger(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let w = lock_world(&state);
     match w.passengers.get(&PassengerId(id)) {
@@ -376,6 +486,9 @@ async fn get_passenger(State(state): State<AppState>, Path(id): Path<String>) ->
     }
 }
 
+#[utoipa::path(get, path = "/resources/{id}", tag = "resources",
+    params(("id" = String, Path)),
+    responses((status = 200, body = ResourceDto), (status = 404, body = ErrorBody)))]
 async fn get_resource(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let w = lock_world(&state);
     match w.resources.get(&ResourceId(id)) {
@@ -384,6 +497,9 @@ async fn get_resource(State(state): State<AppState>, Path(id): Path<String>) -> 
     }
 }
 
+#[utoipa::path(get, path = "/resources/accessible", tag = "resources",
+    params(AccessibleQuery),
+    responses((status = 200, body = Vec<ResourceDto>)))]
 async fn list_accessible_resources(
     State(state): State<AppState>,
     Query(q): Query<AccessibleQuery>,
@@ -398,6 +514,9 @@ async fn list_accessible_resources(
     )
 }
 
+#[utoipa::path(post, path = "/reset", tag = "system",
+    request_body = ActorOnlyReq,
+    responses((status = 204), (status = 403, body = ErrorBody)))]
 async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq>) -> Response {
     // Demo-only affordance, but still gated: caller must identify as
     // an existing crew lead so an anonymous client can't wipe state.
@@ -414,4 +533,51 @@ async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq
     };
     *lock_world(&state) = fresh;
     StatusCode::NO_CONTENT.into_response()
+}
+
+// ---------- OpenAPI ----------------------------------------------------
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "PRMS HTTP API",
+        version = env!("CARGO_PKG_VERSION"),
+        description = "Spaceship X26 Passenger Resource Management System."
+    ),
+    paths(
+        health,
+        list_crew_leads, add_crew_lead, replace_crew_lead, remove_crew_lead,
+        list_passengers, create_passenger, get_passenger,
+        change_passenger_tier, soft_delete_passenger,
+        list_resources, create_resource, get_resource,
+        list_accessible_resources, change_resource_min_tier, soft_delete_resource,
+        use_resource,
+        list_admin_events, list_usage_events,
+        report_by_tier, report_top_resources, report_personal_history,
+        reset_world,
+    ),
+    components(schemas(
+        TierDto, OutcomeDto,
+        CrewLeadDto, AddCrewLeadReq, ReplaceCrewLeadReq, RemoveCrewLeadReq,
+        PassengerDto, CreatePassengerReq, ChangeTierReq,
+        ResourceDto, CreateResourceReq,
+        ActorOnlyReq, UseResourceReq,
+        UsageEventDto, AdminEventDto,
+        TierCountsDto, TopResourceDto,
+        ErrorBody,
+    )),
+    tags(
+        (name = "system", description = "Health & admin"),
+        (name = "crew-leads", description = "Crew lead management"),
+        (name = "passengers", description = "Passenger lifecycle"),
+        (name = "resources", description = "Resource lifecycle"),
+        (name = "access", description = "Access checks"),
+        (name = "audit", description = "Admin / usage audit logs"),
+        (name = "reports", description = "Aggregated reports"),
+    )
+)]
+struct ApiDoc;
+
+async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
+    Json(ApiDoc::openapi())
 }
