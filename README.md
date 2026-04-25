@@ -12,7 +12,8 @@ more tests. See [`AGENTS.md`](./AGENTS.md) for the house rules.
 
 ```bash
 rustup show
-cargo nextest run     # or: cargo test
+cargo nextest run                  # core library + integration tests
+cargo nextest run --features http  # adds the axum HTTP adapter test suite
 ```
 
 That's the whole core path — no env vars, no services, no network.
