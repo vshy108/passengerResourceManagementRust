@@ -1,0 +1,4 @@
+{
+  "rust-analyzer.cargo.features": ["http"],
+  "rust-analyzer.check.features": ["http"]
+}
