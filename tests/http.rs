@@ -512,10 +512,26 @@ async fn reset_replaces_state_with_fresh_demo_world() {
     let (_, before) = send(&app, req(Method::GET, "/passengers", None)).await;
     assert_eq!(before.as_array().unwrap().len(), 2);
 
-    // Reset.
-    let (status, _) = send(&app, req(Method::POST, "/reset", None)).await;
+    // Reset (auth required).
+    let (status, _) = send(
+        &app,
+        req(Method::POST, "/reset", Some(json!({"actor_id": ARIA}))),
+    )
+    .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
     let (_, after) = send(&app, req(Method::GET, "/passengers", None)).await;
     assert_eq!(after.as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn reset_rejects_unknown_actor_with_403() {
+    let app = app();
+    let (status, body) = send(
+        &app,
+        req(Method::POST, "/reset", Some(json!({"actor_id": "nobody"}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "UnauthorizedActor");
 }
