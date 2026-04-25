@@ -128,7 +128,15 @@ export function LiveServerPanel(): JSX.Element {
           </button>
           <button
             onClick={async () => {
-              const r = await api.reset();
+              const actorId = state.crewLeads[0]?.id ?? "cl-aria";
+              if (
+                !window.confirm(
+                  "Reset live server state? All passengers, resources and audit history will be replaced with the seeded demo world.",
+                )
+              ) {
+                return;
+              }
+              const r = await api.reset(actorId);
               announce(r.ok ? "Server state reset" : `reset failed: ${r.error}`);
               await refresh();
             }}
