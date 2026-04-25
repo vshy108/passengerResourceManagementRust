@@ -7,3 +7,4 @@ pub mod crew_lead_service;
 pub mod guards;
 pub mod passenger_service;
 pub mod ports;
+pub mod resource_service;
