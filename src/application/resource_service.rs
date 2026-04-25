@@ -3,6 +3,8 @@
 use crate::application::guards::require_crew_lead;
 use crate::application::ports::{AdminEventSink, Clock};
 use crate::domain::actor::Actor;
+use crate::domain::admin_event::{AdminAction, AdminEvent, TargetKind};
+use crate::domain::crew_lead::CrewLeadId;
 use crate::domain::errors::DomainError;
 use crate::domain::resource::{Resource, ResourceId};
 use crate::domain::tier::Tier;
@@ -12,7 +14,6 @@ pub struct ResourceService<C: Clock> {
     deleted: Vec<Resource>,
     clock: C,
     audit: Option<Box<dyn AdminEventSink>>,
-    #[allow(dead_code)] // populated and used in GREEN.
     next_audit_id: u64,
 }
 
@@ -59,6 +60,12 @@ impl<C: Clock> ResourceService<C> {
             deleted_at: None,
         };
         self.active.push(r.clone());
+        self.emit(
+            actor,
+            AdminAction::ResourceCreated,
+            r.id.0.clone(),
+            Some(format!("min_tier={min_tier:?}")),
+        );
         Ok(r)
     }
 
@@ -79,6 +86,12 @@ impl<C: Clock> ResourceService<C> {
             .find(|r| r.id == *id)
             .ok_or(DomainError::ResourceNotFound)?;
         slot.min_tier = new_tier;
+        self.emit(
+            actor,
+            AdminAction::ResourceMinTierChanged,
+            id.0.clone(),
+            Some(format!("min_tier={new_tier:?}")),
+        );
         Ok(())
     }
 
@@ -96,6 +109,7 @@ impl<C: Clock> ResourceService<C> {
         let mut r = self.active.remove(pos);
         r.deleted_at = Some(self.clock.now());
         self.deleted.push(r);
+        self.emit(actor, AdminAction::ResourceDeleted, id.0.clone(), None);
         Ok(())
     }
 
@@ -128,5 +142,31 @@ impl<C: Clock> ResourceService<C> {
             .rev()
             .find(|r| r.id == *id)
             .ok_or(DomainError::ResourceNotFound)
+    }
+
+    fn emit(
+        &mut self,
+        actor: &Actor,
+        action: AdminAction,
+        target_id: String,
+        details: Option<String>,
+    ) {
+        let Some(sink) = self.audit.as_mut() else {
+            return;
+        };
+        let Actor::CrewLead(actor_id) = actor else {
+            return;
+        };
+        let event = AdminEvent {
+            id: self.next_audit_id,
+            actor_id: CrewLeadId(actor_id.0.clone()),
+            action,
+            target_kind: TargetKind::Resource,
+            target_id,
+            timestamp: self.clock.now(),
+            details,
+        };
+        self.next_audit_id += 1;
+        sink.append(event);
     }
 }

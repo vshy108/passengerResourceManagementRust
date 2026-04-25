@@ -46,10 +46,12 @@ fn au_s2_passenger_change_tier_emits_with_details() {
     let events = sink.snapshot();
     assert_eq!(events.len(), 2);
     assert_eq!(events[1].action, AdminAction::PassengerTierChanged);
-    assert!(events[1]
-        .details
-        .as_deref()
-        .is_some_and(|s| s.contains("Gold")));
+    assert!(
+        events[1]
+            .details
+            .as_deref()
+            .is_some_and(|s| s.contains("Gold"))
+    );
 }
 
 #[test]
@@ -100,10 +102,12 @@ fn au_s5_resource_change_min_tier_emits_with_details() {
         .unwrap();
     let events = sink.snapshot();
     assert_eq!(events[1].action, AdminAction::ResourceMinTierChanged);
-    assert!(events[1]
-        .details
-        .as_deref()
-        .is_some_and(|s| s.contains("Platinum")));
+    assert!(
+        events[1]
+            .details
+            .as_deref()
+            .is_some_and(|s| s.contains("Platinum"))
+    );
 }
 
 #[test]
