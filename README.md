@@ -73,13 +73,31 @@ curl -X POST http://127.0.0.1:8080/access \
   -d '{"passenger_id":"ps-001","resource_id":"res-lounge"}'
 ```
 
+### Configuration
+
+All flags also read from the matching environment variable:
+
+| Flag                    | Env                        | Default            | Purpose                                              |
+| ----------------------- | -------------------------- | ------------------ | ---------------------------------------------------- |
+| `--bind`                | `PRMS_BIND`                | `127.0.0.1:8080`   | Listen address                                       |
+| `--cors-origins`        | `PRMS_CORS_ORIGINS`        | _unset_ (`Any`)    | Comma-separated allow-list, e.g. `https://app.x26`   |
+| `--shutdown-grace-secs` | `PRMS_SHUTDOWN_GRACE_SECS` | `10`               | Max seconds to drain in-flight requests after SIGINT |
+| `RUST_LOG`              | _(env only)_               | `info`             | tracing-subscriber filter                            |
+
+Every response carries an `x-request-id` header (UUID-v4 if the client
+did not supply one) so logs can be correlated. The full OpenAPI 3.1
+spec is served at `GET /openapi.json` — point Swagger UI / Redoc /
+Stoplight at it.
+
+### Endpoints
+
 Endpoint surface lives in [`src/interface/http.rs`](./src/interface/http.rs)
 and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
-CORS is open by default so the React demo can call it directly.
 
 | Method | Path                              | Purpose                              |
 | ------ | --------------------------------- | ------------------------------------ |
 | GET    | `/health`                         | liveness probe                       |
+| GET    | `/openapi.json`                   | OpenAPI 3.1 document                 |
 | GET    | `/crew-leads`                     | list crew leads                      |
 | POST   | `/crew-leads`                     | add crew lead (always 409, capped)   |
 | PUT    | `/crew-leads/:old_id`             | replace crew lead                    |
@@ -128,3 +146,5 @@ The HTTP server is a demo affordance, not a production target:
   intended for local demo / test use only.
 - The web client and the HTTP server keep **independent** in-process
   state — mutations in one are not visible in the other.
+- CORS defaults to `Any` for dev convenience; set `PRMS_CORS_ORIGINS`
+  before exposing the server beyond localhost.
