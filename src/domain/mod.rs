@@ -7,5 +7,6 @@ pub mod actor;
 pub mod crew_lead;
 pub mod errors;
 pub mod passenger;
+pub mod resource;
 pub mod tier;
 pub mod timestamp;

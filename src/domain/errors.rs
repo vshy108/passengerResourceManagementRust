@@ -42,4 +42,12 @@ pub enum DomainError {
     /// PS-E3.
     #[error("passenger not found")]
     PassengerNotFound,
+
+    /// RS-E2.
+    #[error("resource already exists")]
+    ResourceAlreadyExists,
+
+    /// RS-E3.
+    #[error("resource not found")]
+    ResourceNotFound,
 }
