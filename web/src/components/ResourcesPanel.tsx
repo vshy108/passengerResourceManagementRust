@@ -3,7 +3,7 @@ import { asCrewLead } from "../domain/actor";
 import type { DomainError } from "../domain/errors";
 import { resourceId } from "../domain/ids";
 import { ALL_TIERS, type Tier } from "../domain/tier";
-import { useStore } from "../state/store";
+import { useStore } from "../state/useStore";
 import { TierTag } from "./TierTag";
 
 export function ResourcesPanel(): JSX.Element {

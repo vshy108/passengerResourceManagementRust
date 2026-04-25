@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { crewLeadId } from "../domain/ids";
-import { useStore } from "../state/store";
+import { useStore } from "../state/useStore";
 import type { DomainError } from "../domain/errors";
 
 export function CrewLeadsPanel(): JSX.Element {

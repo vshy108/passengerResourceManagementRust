@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { asPassenger } from "../domain/actor";
-import { useStore } from "../state/store";
+import { useStore } from "../state/useStore";
 import { TierTag } from "./TierTag";
 
 export function AccessPanel(): JSX.Element {
