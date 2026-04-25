@@ -1,6 +1,7 @@
 //! Application-layer port traits. Concrete adapters live in
 //! `crate::infrastructure`.
 
+use crate::domain::admin_event::AdminEvent;
 use crate::domain::timestamp::Timestamp;
 use crate::domain::usage_event::UsageEvent;
 
@@ -18,4 +19,9 @@ pub trait UsageEventSink {
 /// Read-only view over `UsageEvent`s for reporting queries.
 pub trait UsageEventSource {
     fn list(&self) -> &[UsageEvent];
+}
+
+/// Append-only sink for `AdminEvent`s. AU-R4 / AU-I1.
+pub trait AdminEventSink {
+    fn append(&mut self, event: AdminEvent);
 }

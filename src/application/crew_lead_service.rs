@@ -1,5 +1,6 @@
 //! Crew Lead application service. See `specs/02-crew-lead.md` (CL).
 
+use crate::application::ports::{AdminEventSink, Clock};
 use crate::domain::crew_lead::{CrewLead, CrewLeadId};
 use crate::domain::errors::DomainError;
 
@@ -8,6 +9,14 @@ use crate::domain::errors::DomainError;
 /// Exactly three Crew Leads exist after `bootstrap` (CL-I1).
 pub struct CrewLeadService {
     leads: Vec<CrewLead>,
+    audit: Option<AuditCfg>,
+}
+
+#[allow(dead_code)] // fields populated and used in GREEN.
+struct AuditCfg {
+    clock: Box<dyn Clock>,
+    sink: Box<dyn AdminEventSink>,
+    next_id: u64,
 }
 
 impl CrewLeadService {
@@ -28,7 +37,7 @@ impl CrewLeadService {
                 }
             }
         }
-        Ok(Self { leads })
+        Ok(Self { leads, audit: None })
     }
 
     /// CL-R2 — always rejected because the cap is already at 3.
@@ -76,5 +85,34 @@ impl CrewLeadService {
     #[must_use]
     pub fn list(&self) -> &[CrewLead] {
         &self.leads
+    }
+
+    /// AU-S7 — audit-aware bootstrap. Stub for RED phase: does NOT emit
+    /// any event yet.
+    pub fn bootstrap_audited(
+        leads: Vec<CrewLead>,
+        clock: Box<dyn Clock>,
+        sink: Box<dyn AdminEventSink>,
+    ) -> Result<Self, DomainError> {
+        let mut svc = Self::bootstrap(leads)?;
+        svc.audit = Some(AuditCfg {
+            clock,
+            sink,
+            next_id: 1,
+        });
+        Ok(svc)
+    }
+
+    /// AU-S8 — audit-aware replace. Stub for RED phase: emits no event.
+    ///
+    /// # Errors
+    /// See `replace`.
+    pub fn replace_audited(
+        &mut self,
+        _actor_id: &CrewLeadId,
+        old_id: &CrewLeadId,
+        new_lead: CrewLead,
+    ) -> Result<(), DomainError> {
+        self.replace(old_id, new_lead)
     }
 }

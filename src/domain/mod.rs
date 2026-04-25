@@ -4,6 +4,7 @@
 //! deeply testable.
 
 pub mod actor;
+pub mod admin_event;
 pub mod crew_lead;
 pub mod errors;
 pub mod passenger;
