@@ -36,6 +36,15 @@ jobs:
             --ignore-filename-regex 'src/bin/' \
             --fail-under-lines 98
 
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-deny
+      - name: cargo deny
+        run: cargo deny check advisories bans licenses sources
+
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -49,4 +58,6 @@ jobs:
           cache: "npm"
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - run: npm run lint
+      - run: npm test
       - run: npm run build
