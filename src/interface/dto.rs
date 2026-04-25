@@ -7,7 +7,7 @@ use crate::domain::admin_event::{AdminAction, AdminEvent, TargetKind};
 use crate::domain::crew_lead::{CrewLead, CrewLeadId};
 use crate::domain::passenger::Passenger;
 use crate::domain::resource::Resource;
-use crate::domain::tier::{InvalidTier, Tier};
+use crate::domain::tier::Tier;
 use crate::domain::usage_event::{Outcome, UsageEvent};
 
 // ---------- tier --------------------------------------------------------
@@ -36,13 +36,6 @@ impl From<TierDto> for Tier {
             TierDto::Gold => Tier::Gold,
             TierDto::Platinum => Tier::Platinum,
         }
-    }
-}
-
-impl TryFrom<&str> for TierDto {
-    type Error = InvalidTier;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Tier::try_from(s).map(TierDto::from)
     }
 }
 
