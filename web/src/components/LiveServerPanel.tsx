@@ -126,6 +126,16 @@ export function LiveServerPanel(): JSX.Element {
           <button onClick={() => void refresh()} disabled={status !== "online"}>
             Refresh all
           </button>
+          <button
+            onClick={async () => {
+              const r = await api.reset();
+              announce(r.ok ? "Server state reset" : `reset failed: ${r.error}`);
+              await refresh();
+            }}
+            disabled={status !== "online"}
+          >
+            Reset server state
+          </button>
           {flash && <span className="muted">→ {flash}</span>}
         </div>
 
@@ -185,6 +195,7 @@ export function LiveServerPanel(): JSX.Element {
               }}
             />
 
+            <AccessibleSection />
             <ReportsSection
               byTier={state.byTier}
               topResources={state.topResources}
@@ -783,6 +794,55 @@ function AuditSection({ audit }: { audit: ApiAdminEvent[] }): JSX.Element {
           </tbody>
         </table>
       </div>
+    </>
+  );
+}
+
+function AccessibleSection(): JSX.Element {
+  const [tier, setTier] = useState<Tier>("Silver");
+  const [rows, setRows] = useState<ApiResource[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = async (t: Tier): Promise<void> => {
+    const r = await api.accessibleFor(t);
+    if (r.ok) {
+      setRows(r.value);
+      setErr(null);
+    } else {
+      setErr(r.error);
+      setRows(null);
+    }
+  };
+
+  useEffect(() => {
+    void load(tier);
+  }, [tier]);
+
+  return (
+    <>
+      <h4>Accessible resources for tier</h4>
+      <div className="row">
+        <select
+          value={tier}
+          onChange={(e) => setTier(e.target.value as Tier)}
+        >
+          <option value="Silver">Silver</option>
+          <option value="Gold">Gold</option>
+          <option value="Platinum">Platinum</option>
+        </select>
+      </div>
+      {err && <p className="error">{err}</p>}
+      {rows && (
+        <ul>
+          {rows.map((r) => (
+            <li key={r.id}>
+              <code>{r.id}</code> — {r.name} (min{" "}
+              <TierTag tier={r.min_tier} />)
+            </li>
+          ))}
+          {rows.length === 0 && <li className="muted">none</li>}
+        </ul>
+      )}
     </>
   );
 }

@@ -136,6 +136,29 @@ export const api = {
       `/reports/history/${encodeURIComponent(passengerId)}`,
     ),
 
+  passenger: (id: string) =>
+    call<ApiPassenger>(`/passengers/${encodeURIComponent(id)}`),
+
+  resource: (id: string) =>
+    call<ApiResource>(`/resources/${encodeURIComponent(id)}`),
+
+  accessibleFor: (tier: Tier) =>
+    call<ApiResource[]>(`/resources/accessible?tier=${tier}`),
+
+  reset: (): Promise<Result<void>> => call<void>("/reset", { method: "POST" }),
+
+  addCrewLead: (lead: ApiCrewLead): Promise<Result<void>> =>
+    call<void>("/crew-leads", {
+      method: "POST",
+      body: JSON.stringify({ lead }),
+    }),
+
+  removeCrewLead: (actorId: string, id: string): Promise<Result<void>> =>
+    call<void>(`/crew-leads/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ actor_id: actorId }),
+    }),
+
   replaceCrewLead: (
     actorId: string,
     oldId: string,
