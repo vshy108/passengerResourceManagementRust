@@ -107,5 +107,21 @@ CORS is open by default so the React demo can call it directly.
 - Rust 2024, stable channel pinned in [`rust-toolchain.toml`](./rust-toolchain.toml)
 - `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
 - Coverage: `cargo llvm-cov nextest`
+- CI: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs fmt, clippy
+  (default + `--features http`), nextest (default + `--features http`), and
+  the web build on every push and PR.
 
 See [`AGENTS.md`](./AGENTS.md) for full contribution rules.
+
+## Limitations
+
+The HTTP server is a demo affordance, not a production target:
+
+- State is held in a single `Mutex<World>` — fine for the demo, will not
+  scale beyond a handful of concurrent writers.
+- All admin endpoints accept `actor_id` at face value; this crate ships
+  no authentication layer (see [`AGENTS.md`](./AGENTS.md) §8).
+- `POST /reset` is gated by "must be a known crew lead" but is still
+  intended for local demo / test use only.
+- The web client and the HTTP server keep **independent** in-process
+  state — mutations in one are not visible in the other.
