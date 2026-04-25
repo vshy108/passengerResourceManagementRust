@@ -113,6 +113,10 @@ fn err_response_owned(e: &DomainError) -> Response {
 }
 
 fn lock_world(state: &AppState) -> std::sync::MutexGuard<'_, World> {
+    // SAFETY (re: AGENTS.md §8): a poisoned lock means a previous
+    // handler panicked mid-mutation, leaving the World in an
+    // unknown state. Continuing would corrupt the audit trail, so
+    // we deliberately propagate the panic to crash the worker.
     state.lock().expect("world mutex poisoned")
 }
 
@@ -392,7 +396,16 @@ async fn list_accessible_resources(
     )
 }
 
-async fn reset_world(State(state): State<AppState>) -> Response {
+async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq>) -> Response {
+    // Demo-only affordance, but still gated: caller must identify as
+    // an existing crew lead so an anonymous client can't wipe state.
+    {
+        let w = lock_world(&state);
+        let actor_id = CrewLeadId(req.actor_id.clone());
+        if !w.crew_leads.list().iter().any(|c| c.id == actor_id) {
+            return err_response_owned(&DomainError::UnauthorizedActor);
+        }
+    }
     let fresh = match build_demo_world() {
         Ok(w) => w,
         Err(e) => return err_response_owned(&e),
