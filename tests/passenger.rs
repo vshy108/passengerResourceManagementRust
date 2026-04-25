@@ -100,7 +100,10 @@ fn ps_s5_passenger_actor_cannot_change_tier() {
     .unwrap();
     let res = svc.change_tier(&passenger_actor(), &PassengerId::from("p1"), Tier::Gold);
     assert_eq!(res, Err(DomainError::UnauthorizedActor));
-    assert_eq!(svc.get(&PassengerId::from("p1")).unwrap().tier, Tier::Silver);
+    assert_eq!(
+        svc.get(&PassengerId::from("p1")).unwrap().tier,
+        Tier::Silver
+    );
 }
 
 #[test]
