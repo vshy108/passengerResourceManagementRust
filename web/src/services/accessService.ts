@@ -20,7 +20,11 @@ export class AccessService {
     private readonly resources: ResourceService,
   ) {}
 
-  useResource(actor: Actor, passengerId: PassengerId, resourceId: ResourceId): Result<UsageEvent> {
+  useResource(
+    actor: Actor,
+    passengerId: PassengerId,
+    resourceId: ResourceId,
+  ): Result<UsageEvent> {
     // AC-R6 — passenger acting on behalf of themselves only.
     if (actor.kind !== "Passenger" || actor.id !== passengerId) {
       return err("UnauthorizedActor");

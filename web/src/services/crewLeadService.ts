@@ -21,7 +21,8 @@ export class CrewLeadService {
     if (leads.length !== 3) return err("CrewLeadBootstrapInvalid");
     for (let i = 0; i < leads.length; i++) {
       for (let j = i + 1; j < leads.length; j++) {
-        if (leads[i]!.id === leads[j]!.id) return err("CrewLeadBootstrapInvalid");
+        if (leads[i]!.id === leads[j]!.id)
+          return err("CrewLeadBootstrapInvalid");
       }
     }
     const svc = new CrewLeadService(clock, emit);
@@ -49,7 +50,11 @@ export class CrewLeadService {
   }
 
   // CL-R4 — atomic swap. Audited.
-  replace(actorId: CrewLeadId, oldId: CrewLeadId, newLead: CrewLead): Result<void> {
+  replace(
+    actorId: CrewLeadId,
+    oldId: CrewLeadId,
+    newLead: CrewLead,
+  ): Result<void> {
     const slot = this.leads.findIndex((l) => l.id === oldId);
     if (slot === -1) return err("CrewLeadNotFound");
     if (this.leads.some((l, i) => i !== slot && l.id === newLead.id)) {
