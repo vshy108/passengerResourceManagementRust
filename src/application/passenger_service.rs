@@ -51,7 +51,7 @@ impl<C: Clock> PassengerService<C> {
         name: String,
         tier: Tier,
     ) -> Result<Passenger, DomainError> {
-        require_crew_lead(actor)?;
+        let actor_id = require_crew_lead(actor)?.clone();
         if self.active.iter().any(|p| p.id == id) {
             return Err(DomainError::PassengerAlreadyExists);
         }
@@ -63,7 +63,7 @@ impl<C: Clock> PassengerService<C> {
         };
         self.active.push(p.clone());
         self.emit(
-            actor,
+            &actor_id,
             AdminAction::PassengerCreated,
             p.id.0.clone(),
             Some(format!("tier={tier:?}")),
@@ -82,7 +82,7 @@ impl<C: Clock> PassengerService<C> {
         id: &PassengerId,
         new_tier: Tier,
     ) -> Result<(), DomainError> {
-        require_crew_lead(actor)?;
+        let actor_id = require_crew_lead(actor)?.clone();
         let slot = self
             .active
             .iter_mut()
@@ -90,7 +90,7 @@ impl<C: Clock> PassengerService<C> {
             .ok_or(DomainError::PassengerNotFound)?;
         slot.tier = new_tier;
         self.emit(
-            actor,
+            &actor_id,
             AdminAction::PassengerTierChanged,
             id.0.clone(),
             Some(format!("tier={new_tier:?}")),
@@ -105,7 +105,7 @@ impl<C: Clock> PassengerService<C> {
     /// - `UnauthorizedActor` (PS-E1).
     /// - `PassengerNotFound` (PS-E3).
     pub fn soft_delete(&mut self, actor: &Actor, id: &PassengerId) -> Result<(), DomainError> {
-        require_crew_lead(actor)?;
+        let actor_id = require_crew_lead(actor)?.clone();
         let pos = self
             .active
             .iter()
@@ -114,7 +114,7 @@ impl<C: Clock> PassengerService<C> {
         let mut p = self.active.remove(pos);
         p.deleted_at = Some(self.clock.now());
         self.deleted.push(p);
-        self.emit(actor, AdminAction::PassengerDeleted, id.0.clone(), None);
+        self.emit(&actor_id, AdminAction::PassengerDeleted, id.0.clone(), None);
         Ok(())
     }
 
@@ -141,11 +141,12 @@ impl<C: Clock> PassengerService<C> {
             .ok_or(DomainError::PassengerNotFound)
     }
 
-    /// Emit an audit event when a sink is configured. The actor is
-    /// assumed to already have been validated as a Crew Lead.
+    /// Emit an audit event when a sink is configured. Caller passes a
+    /// `CrewLeadId` obtained from `require_crew_lead`, so no further
+    /// authorisation pattern-matching is needed here.
     fn emit(
         &mut self,
-        actor: &Actor,
+        actor_id: &CrewLeadId,
         action: AdminAction,
         target_id: String,
         details: Option<String>,
@@ -153,12 +154,9 @@ impl<C: Clock> PassengerService<C> {
         let Some(sink) = self.audit.as_mut() else {
             return;
         };
-        let Actor::CrewLead(actor_id) = actor else {
-            return;
-        };
         let event = AdminEvent {
             id: self.next_audit_id,
-            actor_id: CrewLeadId(actor_id.0.clone()),
+            actor_id: actor_id.clone(),
             action,
             target_kind: TargetKind::Passenger,
             target_id,

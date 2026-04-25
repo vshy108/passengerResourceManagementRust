@@ -48,7 +48,7 @@ impl<C: Clock> ResourceService<C> {
         category: String,
         min_tier: Tier,
     ) -> Result<Resource, DomainError> {
-        require_crew_lead(actor)?;
+        let actor_id = require_crew_lead(actor)?.clone();
         if self.active.iter().any(|r| r.id == id) {
             return Err(DomainError::ResourceAlreadyExists);
         }
@@ -61,7 +61,7 @@ impl<C: Clock> ResourceService<C> {
         };
         self.active.push(r.clone());
         self.emit(
-            actor,
+            &actor_id,
             AdminAction::ResourceCreated,
             r.id.0.clone(),
             Some(format!("min_tier={min_tier:?}")),
@@ -79,7 +79,7 @@ impl<C: Clock> ResourceService<C> {
         id: &ResourceId,
         new_tier: Tier,
     ) -> Result<(), DomainError> {
-        require_crew_lead(actor)?;
+        let actor_id = require_crew_lead(actor)?.clone();
         let slot = self
             .active
             .iter_mut()
@@ -87,7 +87,7 @@ impl<C: Clock> ResourceService<C> {
             .ok_or(DomainError::ResourceNotFound)?;
         slot.min_tier = new_tier;
         self.emit(
-            actor,
+            &actor_id,
             AdminAction::ResourceMinTierChanged,
             id.0.clone(),
             Some(format!("min_tier={new_tier:?}")),
@@ -100,7 +100,7 @@ impl<C: Clock> ResourceService<C> {
     /// # Errors
     /// `UnauthorizedActor` (RS-E1) or `ResourceNotFound` (RS-E3).
     pub fn soft_delete(&mut self, actor: &Actor, id: &ResourceId) -> Result<(), DomainError> {
-        require_crew_lead(actor)?;
+        let actor_id = require_crew_lead(actor)?.clone();
         let pos = self
             .active
             .iter()
@@ -109,7 +109,7 @@ impl<C: Clock> ResourceService<C> {
         let mut r = self.active.remove(pos);
         r.deleted_at = Some(self.clock.now());
         self.deleted.push(r);
-        self.emit(actor, AdminAction::ResourceDeleted, id.0.clone(), None);
+        self.emit(&actor_id, AdminAction::ResourceDeleted, id.0.clone(), None);
         Ok(())
     }
 
@@ -146,7 +146,7 @@ impl<C: Clock> ResourceService<C> {
 
     fn emit(
         &mut self,
-        actor: &Actor,
+        actor_id: &CrewLeadId,
         action: AdminAction,
         target_id: String,
         details: Option<String>,
@@ -154,12 +154,9 @@ impl<C: Clock> ResourceService<C> {
         let Some(sink) = self.audit.as_mut() else {
             return;
         };
-        let Actor::CrewLead(actor_id) = actor else {
-            return;
-        };
         let event = AdminEvent {
             id: self.next_audit_id,
-            actor_id: CrewLeadId(actor_id.0.clone()),
+            actor_id: actor_id.clone(),
             action,
             target_kind: TargetKind::Resource,
             target_id,

@@ -42,3 +42,38 @@ impl AdminEventSink for InMemoryAdminEventSink {
         self.inner.borrow_mut().push(event);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::admin_event::{AdminAction, TargetKind};
+    use crate::domain::crew_lead::CrewLeadId;
+    use crate::domain::timestamp::Timestamp;
+
+    fn sample_event() -> AdminEvent {
+        AdminEvent {
+            id: 1,
+            actor_id: CrewLeadId("cl-1".into()),
+            action: AdminAction::CrewLeadBootstrapped,
+            target_kind: TargetKind::CrewLead,
+            target_id: "cl-1".into(),
+            timestamp: Timestamp(0),
+            details: None,
+        }
+    }
+
+    #[test]
+    fn new_sink_is_empty_with_zero_len() {
+        let sink = InMemoryAdminEventSink::new();
+        assert!(sink.is_empty());
+        assert_eq!(sink.len(), 0);
+    }
+
+    #[test]
+    fn append_increments_len_and_clears_is_empty() {
+        let mut sink = InMemoryAdminEventSink::new();
+        sink.append(sample_event());
+        assert!(!sink.is_empty());
+        assert_eq!(sink.len(), 1);
+    }
+}
