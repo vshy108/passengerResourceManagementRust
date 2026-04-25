@@ -50,4 +50,8 @@ pub enum DomainError {
     /// RS-E3.
     #[error("resource not found")]
     ResourceNotFound,
+
+    /// AC-E2.
+    #[error("access denied")]
+    AccessDenied,
 }

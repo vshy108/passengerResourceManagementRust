@@ -3,6 +3,7 @@
 //! Services depend on **trait** ports (when needed), never on concrete
 //! infrastructure adapters.
 
+pub mod access_service;
 pub mod crew_lead_service;
 pub mod guards;
 pub mod passenger_service;
