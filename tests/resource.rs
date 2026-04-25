@@ -113,7 +113,12 @@ fn rs_s7_soft_delete_excludes_from_list_but_get_resolves() {
     svc.soft_delete(&admin(), &ResourceId::from("r1"))
         .expect("RS-S7");
     assert!(svc.list().is_empty());
-    assert!(svc.get(&ResourceId::from("r1")).unwrap().deleted_at.is_some());
+    assert!(
+        svc.get(&ResourceId::from("r1"))
+            .unwrap()
+            .deleted_at
+            .is_some()
+    );
 }
 
 #[test]

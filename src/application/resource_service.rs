@@ -35,8 +35,19 @@ impl<C: Clock> ResourceService<C> {
         category: String,
         min_tier: Tier,
     ) -> Result<Resource, DomainError> {
-        let _ = (actor, &id, &name, &category, min_tier);
-        todo!("RS-R1: implement create")
+        require_crew_lead(actor)?;
+        if self.active.iter().any(|r| r.id == id) {
+            return Err(DomainError::ResourceAlreadyExists);
+        }
+        let r = Resource {
+            id,
+            name,
+            category,
+            min_tier,
+            deleted_at: None,
+        };
+        self.active.push(r.clone());
+        Ok(r)
     }
 
     /// RS-R3.
@@ -49,8 +60,14 @@ impl<C: Clock> ResourceService<C> {
         id: &ResourceId,
         new_tier: Tier,
     ) -> Result<(), DomainError> {
-        let _ = (actor, id, new_tier);
-        todo!("RS-R3: implement change_min_tier")
+        require_crew_lead(actor)?;
+        let slot = self
+            .active
+            .iter_mut()
+            .find(|r| r.id == *id)
+            .ok_or(DomainError::ResourceNotFound)?;
+        slot.min_tier = new_tier;
+        Ok(())
     }
 
     /// RS-R4.
@@ -58,8 +75,16 @@ impl<C: Clock> ResourceService<C> {
     /// # Errors
     /// `UnauthorizedActor` (RS-E1) or `ResourceNotFound` (RS-E3).
     pub fn soft_delete(&mut self, actor: &Actor, id: &ResourceId) -> Result<(), DomainError> {
-        let _ = (actor, id);
-        todo!("RS-R4: implement soft_delete")
+        require_crew_lead(actor)?;
+        let pos = self
+            .active
+            .iter()
+            .position(|r| r.id == *id)
+            .ok_or(DomainError::ResourceNotFound)?;
+        let mut r = self.active.remove(pos);
+        r.deleted_at = Some(self.clock.now());
+        self.deleted.push(r);
+        Ok(())
     }
 
     /// RS-R6.
@@ -71,8 +96,11 @@ impl<C: Clock> ResourceService<C> {
     /// RS-R7.
     #[must_use]
     pub fn list_accessible_for(&self, tier: Tier) -> Vec<Resource> {
-        let _ = tier;
-        todo!("RS-R7: implement list_accessible_for")
+        self.active
+            .iter()
+            .filter(|r| tier.can_access(r.min_tier))
+            .cloned()
+            .collect()
     }
 
     /// RS-R5 / RS-R9-equivalent: latest record (active or soft-deleted).
@@ -80,7 +108,13 @@ impl<C: Clock> ResourceService<C> {
     /// # Errors
     /// `ResourceNotFound` (RS-E3).
     pub fn get(&self, id: &ResourceId) -> Result<&Resource, DomainError> {
-        let _ = id;
-        todo!("RS-R5: implement get")
+        if let Some(r) = self.active.iter().find(|r| r.id == *id) {
+            return Ok(r);
+        }
+        self.deleted
+            .iter()
+            .rev()
+            .find(|r| r.id == *id)
+            .ok_or(DomainError::ResourceNotFound)
     }
 }
