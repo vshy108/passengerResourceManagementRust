@@ -65,6 +65,46 @@ async fn health_returns_ok() {
     assert_eq!(body, Value::String("ok".into()));
 }
 
+#[tokio::test]
+async fn unknown_route_returns_404() {
+    let app = app();
+    let (status, _) = send(&app, req(Method::GET, "/does-not-exist", None)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn malformed_json_body_returns_4xx() {
+    let app = app();
+    let bad = Request::builder()
+        .method(Method::POST)
+        .uri("/access")
+        .header("content-type", "application/json")
+        .body(Body::from("{not-json"))
+        .expect("request");
+    let (status, _) = send(&app, bad).await;
+    assert!(status.is_client_error());
+}
+
+#[tokio::test]
+async fn unknown_tier_string_is_rejected() {
+    let app = app();
+    let (status, _) = send(
+        &app,
+        req(
+            Method::POST,
+            "/passengers",
+            Some(json!({
+                "actor_id": ARIA,
+                "id": "ps-x",
+                "name": "X",
+                "tier": "Bronze"
+            })),
+        ),
+    )
+    .await;
+    assert!(status.is_client_error());
+}
+
 // ---------- crew leads -------------------------------------------------
 
 #[tokio::test]
