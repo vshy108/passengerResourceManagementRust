@@ -8,7 +8,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{delete, get, patch, post, put},
+    routing::{get, patch, post, put},
 };
 use tower_http::cors::{Any, CorsLayer};
 
@@ -18,11 +18,12 @@ use crate::domain::errors::DomainError;
 use crate::domain::passenger::PassengerId;
 use crate::domain::resource::ResourceId;
 use crate::domain::tier::Tier;
-use crate::interface::composition_root::World;
+use crate::interface::composition_root::{World, build_demo_world};
 use crate::interface::dto::{
-    ActorOnlyReq, AdminEventDto, ChangeTierReq, CreatePassengerReq, CreateResourceReq,
-    CrewLeadDto, ErrorBody, PassengerDto, ReplaceCrewLeadReq, ResourceDto, TierCountsDto,
-    TierDto, TopNQuery, TopResourceDto, UsageEventDto, UseResourceReq,
+    AccessibleQuery, ActorOnlyReq, AddCrewLeadReq, AdminEventDto, ChangeTierReq,
+    CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, PassengerDto, RemoveCrewLeadReq,
+    ReplaceCrewLeadReq, ResourceDto, TierCountsDto, TierDto, TopNQuery, TopResourceDto,
+    UsageEventDto, UseResourceReq,
 };
 
 /// Shared state held by every handler.
@@ -38,16 +39,26 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         // crew leads
-        .route("/crew-leads", get(list_crew_leads))
-        .route("/crew-leads/:old_id", put(replace_crew_lead))
+        .route("/crew-leads", get(list_crew_leads).post(add_crew_lead))
+        .route(
+            "/crew-leads/:old_id",
+            put(replace_crew_lead).delete(remove_crew_lead),
+        )
         // passengers
         .route("/passengers", get(list_passengers).post(create_passenger))
+        .route(
+            "/passengers/:id",
+            get(get_passenger).delete(soft_delete_passenger),
+        )
         .route("/passengers/:id/tier", patch(change_passenger_tier))
-        .route("/passengers/:id", delete(soft_delete_passenger))
         // resources
         .route("/resources", get(list_resources).post(create_resource))
+        .route("/resources/accessible", get(list_accessible_resources))
+        .route(
+            "/resources/:id",
+            get(get_resource).delete(soft_delete_resource),
+        )
         .route("/resources/:id/min-tier", patch(change_resource_min_tier))
-        .route("/resources/:id", delete(soft_delete_resource))
         // access
         .route("/access", post(use_resource))
         // audit + usage
@@ -60,6 +71,8 @@ pub fn router(state: AppState) -> Router {
             "/reports/history/:passenger_id",
             get(report_personal_history),
         )
+        // admin
+        .route("/reset", post(reset_world))
         .with_state(state)
         .layer(cors)
 }
@@ -231,10 +244,7 @@ async fn soft_delete_resource(
     }
 }
 
-async fn use_resource(
-    State(state): State<AppState>,
-    Json(req): Json<UseResourceReq>,
-) -> Response {
+async fn use_resource(State(state): State<AppState>, Json(req): Json<UseResourceReq>) -> Response {
     let mut w = lock_world(&state);
     let actor = Actor::Passenger(PassengerId(req.passenger_id));
     let World {
@@ -326,4 +336,67 @@ async fn report_personal_history(
             .map(UsageEventDto::from)
             .collect(),
     )
+}
+
+// ---------- new endpoints ---------------------------------------------
+
+async fn add_crew_lead(State(state): State<AppState>, Json(req): Json<AddCrewLeadReq>) -> Response {
+    let mut w = lock_world(&state);
+    // CL-R2 — always 409 (`CrewLeadLimitReached`) by design.
+    match w.crew_leads.add(req.lead.into()) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => err_response_owned(&e),
+    }
+}
+
+async fn remove_crew_lead(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(_req): Json<RemoveCrewLeadReq>,
+) -> Response {
+    let mut w = lock_world(&state);
+    // CL-R3 — always 409 (`CrewLeadMinimumBreached`) by design.
+    match w.crew_leads.remove(&CrewLeadId(id)) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => err_response_owned(&e),
+    }
+}
+
+async fn get_passenger(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    let w = lock_world(&state);
+    match w.passengers.get(&PassengerId(id)) {
+        Ok(p) => (StatusCode::OK, Json(PassengerDto::from(p))).into_response(),
+        Err(e) => err_response_owned(&e),
+    }
+}
+
+async fn get_resource(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    let w = lock_world(&state);
+    match w.resources.get(&ResourceId(id)) {
+        Ok(r) => (StatusCode::OK, Json(ResourceDto::from(r))).into_response(),
+        Err(e) => err_response_owned(&e),
+    }
+}
+
+async fn list_accessible_resources(
+    State(state): State<AppState>,
+    Query(q): Query<AccessibleQuery>,
+) -> Json<Vec<ResourceDto>> {
+    let w = lock_world(&state);
+    Json(
+        w.resources
+            .list_accessible_for(Tier::from(q.tier))
+            .iter()
+            .map(ResourceDto::from)
+            .collect(),
+    )
+}
+
+async fn reset_world(State(state): State<AppState>) -> Response {
+    let fresh = match build_demo_world() {
+        Ok(w) => w,
+        Err(e) => return err_response_owned(&e),
+    };
+    *lock_world(&state) = fresh;
+    StatusCode::NO_CONTENT.into_response()
 }

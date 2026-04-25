@@ -275,6 +275,23 @@ pub struct TopNQuery {
     pub n: Option<usize>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AccessibleQuery {
+    pub tier: TierDto,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AddCrewLeadReq {
+    pub lead: CrewLeadDto,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveCrewLeadReq {
+    pub actor_id: String,
+}
+
 // ---------- error envelope ----------------------------------------------
 
 #[derive(Debug, Serialize)]
