@@ -4,4 +4,5 @@
 //! `domain` → `application` → `infrastructure` → `interface`.
 //! Dependencies point inward only.
 
+pub mod application;
 pub mod domain;
