@@ -6,8 +6,19 @@ description = "Spaceship X26 Passenger Resource Management System"
 license = "MIT"
 publish = false
 
+[features]
+default = []
+# Optional HTTP adapter. Pulls in axum/tokio/serde and enables the
+# `serve` binary. The core library and tests do not depend on this.
+http = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:serde", "dep:serde_json"]
+
 [dependencies]
 thiserror = "2"
+axum = { version = "0.7", optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"], optional = true }
+tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 
 [dev-dependencies]
 
@@ -16,3 +27,8 @@ unsafe_code = "forbid"
 
 [lints.clippy]
 pedantic = "warn"
+
+[[bin]]
+name = "serve"
+path = "src/bin/serve.rs"
+required-features = ["http"]
