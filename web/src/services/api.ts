@@ -1,17 +1,20 @@
 // Thin client for the Rust axum server (src/interface/http.rs).
 //
-// Configure the base URL via the Vite env var `VITE_API_BASE`
-// (defaults to http://127.0.0.1:8080). All methods return a tagged
-// `Result<T>` mirroring the rest of the demo so error handling is
-// uniform between the in-process services and live API calls.
+// Configure the base URL via the Vite env var `VITE_API_BASE`. When
+// unset, requests go to `/api/*` and are proxied by Vite (see
+// vite.config.ts) to the local serve binary at 127.0.0.1:8080. Set
+// `VITE_API_BASE` to point at a remote server.
+//
+// All methods return a tagged `Result<T>` mirroring the rest of the
+// demo so error handling is uniform between the in-process services
+// and live API calls.
 
 import type { DomainError, Result } from "../domain/errors";
 import { err, ok } from "../domain/errors";
 import type { Tier } from "../domain/tier";
 
 const BASE: string =
-  (import.meta.env.VITE_API_BASE as string | undefined) ??
-  "http://127.0.0.1:8080";
+  (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
 
 const KNOWN_CODES: ReadonlySet<string> = new Set<DomainError>([
   "UnauthorizedActor",
@@ -145,7 +148,11 @@ export const api = {
   accessibleFor: (tier: Tier) =>
     call<ApiResource[]>(`/resources/accessible?tier=${tier}`),
 
-  reset: (): Promise<Result<void>> => call<void>("/reset", { method: "POST" }),
+  reset: (actorId: string): Promise<Result<void>> =>
+    call<void>("/reset", {
+      method: "POST",
+      body: JSON.stringify({ actor_id: actorId }),
+    }),
 
   addCrewLead: (lead: ApiCrewLead): Promise<Result<void>> =>
     call<void>("/crew-leads", {
