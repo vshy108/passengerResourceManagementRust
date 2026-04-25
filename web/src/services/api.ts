@@ -13,8 +13,13 @@ import type { DomainError, Result } from "../domain/errors";
 import { err, ok } from "../domain/errors";
 import type { Tier } from "../domain/tier";
 
-const BASE: string =
-  (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
+/**
+ * Resolved at every call so vitest (and other consumers) can override
+ * `VITE_API_BASE` after this module has been imported.
+ */
+function getBase(): string {
+  return (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
+}
 
 const KNOWN_CODES: ReadonlySet<string> = new Set<DomainError>([
   "UnauthorizedActor",
@@ -97,7 +102,7 @@ interface ErrorBody {
 
 async function call<T>(path: string, init?: RequestInit): Promise<Result<T>> {
   try {
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await fetch(`${getBase()}${path}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",
@@ -119,10 +124,12 @@ async function call<T>(path: string, init?: RequestInit): Promise<Result<T>> {
 }
 
 export const api = {
-  base: BASE,
+  get base(): string {
+    return getBase();
+  },
 
   health: (): Promise<Result<string>> =>
-    fetch(`${BASE}/health`)
+    fetch(`${getBase()}/health`)
       .then(async (r) => (r.ok ? ok(await r.text()) : err("Unknown")))
       .catch(() => err("NetworkError")),
 
