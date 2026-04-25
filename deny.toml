@@ -11,6 +11,13 @@ ignore = []
 multiple-versions = "warn"
 wildcards = "deny"
 deny = []
+# `getrandom` (transitive via uuid → tower-http) pulls both wasip2 and
+# wasip3 wasi runtime crates, each with its own `wit-bindgen`. They are
+# only compiled for wasm32 targets we don't ship, but Cargo still
+# resolves them. Skip the duplicate-version warning.
+skip = [
+    { name = "wit-bindgen" },
+]
 
 [licenses]
 allow = [
