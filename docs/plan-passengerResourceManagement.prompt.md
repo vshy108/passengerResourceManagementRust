@@ -379,4 +379,36 @@ Add a section to `README.md` titled `## AI Usage Disclosure` covering:
   `.git/objects/pack/*` if size matters (keep `.git` for history if
   reviewer values it; otherwise strip).
 
+### Future work — drive coverage to 100%
+Current snapshot: `cargo llvm-cov --summary-only` reports **lines
+99.63% / regions 98.38% / functions 100%**. The remaining gaps are
+all *region-level* (branch arms inside otherwise-covered lines), not
+unreached functions:
+
+- `application/crew_lead_service.rs` — 96.94% regions. Likely
+  uncovered: the duplicate-id branch in `replace_audited` + a
+  `Result::Err` propagation path. Add a test where `replace_audited`
+  is called on an audited service with a colliding `new_lead.id`.
+- `application/passenger_service.rs` — 97.69% regions. Likely
+  uncovered: the `audit.is_none()` early-return inside `emit` (no test
+  exercises a service constructed *without* `with_audit`). Add unit
+  tests in a `#[cfg(test)] mod tests` block covering create / change /
+  soft-delete on a sink-less service.
+- `application/resource_service.rs` — 97.86% regions. Same gap as
+  `passenger_service`; mirror the tests.
+- `domain/tier.rs` — 98.04% regions. Likely the `InvalidTier` `Debug`
+  / `Error` derive expansion. Either add an assertion that exercises
+  `format!("{:?}", InvalidTier(...))` and `Display`, or accept the
+  derive overhead as untestable.
+
+Plan to reach 100%:
+1. Add the missing-audit-sink unit tests to both passenger and
+   resource services (covers ~8 of the 13 missing regions).
+2. Add the duplicate-id `replace_audited` test for crew leads.
+3. Add a tiny `tier::tests` case asserting
+   `format!("{}", InvalidTier("x".into()))` matches the
+   `#[error("invalid tier: {0:?}")]` template.
+4. Wire `cargo llvm-cov --fail-under-regions 100 --fail-under-lines 100`
+   into CI so regressions block merges.
+
 
