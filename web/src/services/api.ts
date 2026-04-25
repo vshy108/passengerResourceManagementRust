@@ -113,7 +113,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<Result<T>> {
       return err(toDomainError(body?.code));
     }
     return ok((await res.json()) as T);
-  } catch (e) {
+  } catch (_e) {
     return err("NetworkError");
   }
 }
