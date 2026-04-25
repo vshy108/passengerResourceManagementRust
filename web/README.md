@@ -73,6 +73,11 @@ and an "Accessible resources for tier" section calls
 `GET /resources/accessible?tier=…`. Override the base URL with
 `VITE_API_BASE=http://host:port npm run dev`.
 
+By default requests go to `/api/*` and Vite proxies them to
+`http://127.0.0.1:8080` (see [`vite.config.ts`](./vite.config.ts)) so
+the demo runs same-origin. Set `VITE_API_BASE` to bypass the proxy
+and point at a remote server directly.
+
 The in-browser panels (top of the page) and the live Rust server
 panel keep **independent** state — mutating one does not affect the
 other.
