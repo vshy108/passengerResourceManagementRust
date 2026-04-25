@@ -1,0 +1,18 @@
+[package]
+name = "passenger_resource_management"
+version = "0.1.0"
+edition = "2024"
+description = "Spaceship X26 Passenger Resource Management System"
+license = "MIT"
+publish = false
+
+[dependencies]
+thiserror = "2"
+
+[dev-dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
