@@ -1,7 +1,7 @@
 //! Resource application service. See `specs/04-resource.md` (RS).
 
 use crate::application::guards::require_crew_lead;
-use crate::application::ports::Clock;
+use crate::application::ports::{AdminEventSink, Clock};
 use crate::domain::actor::Actor;
 use crate::domain::errors::DomainError;
 use crate::domain::resource::{Resource, ResourceId};
@@ -11,6 +11,9 @@ pub struct ResourceService<C: Clock> {
     active: Vec<Resource>,
     deleted: Vec<Resource>,
     clock: C,
+    audit: Option<Box<dyn AdminEventSink>>,
+    #[allow(dead_code)] // populated and used in GREEN.
+    next_audit_id: u64,
 }
 
 impl<C: Clock> ResourceService<C> {
@@ -20,7 +23,16 @@ impl<C: Clock> ResourceService<C> {
             active: Vec::new(),
             deleted: Vec::new(),
             clock,
+            audit: None,
+            next_audit_id: 1,
         }
+    }
+
+    /// AU-R6 — opt in to admin audit emission.
+    #[must_use]
+    pub fn with_audit(mut self, sink: Box<dyn AdminEventSink>) -> Self {
+        self.audit = Some(sink);
+        self
     }
 
     /// RS-R1.

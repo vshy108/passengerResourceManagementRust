@@ -1,7 +1,7 @@
 //! Passenger application service. See `specs/03-passenger.md` (PS).
 
 use crate::application::guards::require_crew_lead;
-use crate::application::ports::Clock;
+use crate::application::ports::{AdminEventSink, Clock};
 use crate::domain::actor::Actor;
 use crate::domain::errors::DomainError;
 use crate::domain::passenger::{Passenger, PassengerId};
@@ -13,6 +13,9 @@ pub struct PassengerService<C: Clock> {
     /// Soft-deleted records (kept for audit lookups via `get`).
     deleted: Vec<Passenger>,
     clock: C,
+    audit: Option<Box<dyn AdminEventSink>>,
+    #[allow(dead_code)] // populated and used in GREEN.
+    next_audit_id: u64,
 }
 
 impl<C: Clock> PassengerService<C> {
@@ -22,7 +25,16 @@ impl<C: Clock> PassengerService<C> {
             active: Vec::new(),
             deleted: Vec::new(),
             clock,
+            audit: None,
+            next_audit_id: 1,
         }
+    }
+
+    /// AU-R6 — opt in to admin audit emission.
+    #[must_use]
+    pub fn with_audit(mut self, sink: Box<dyn AdminEventSink>) -> Self {
+        self.audit = Some(sink);
+        self
     }
 
     /// PS-R1 — Crew-Lead-only create.
