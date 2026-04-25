@@ -108,7 +108,9 @@ async fn main() -> ExitCode {
         }
     };
 
-    tokio::select! {
+    // Bind the select! result to a typed variable so rust-analyzer's
+    // macro expansion infers `ExitCode` unambiguously across both arms.
+    let exit: ExitCode = tokio::select! {
         biased;
         res = serve_fut => match res {
             Ok(()) => ExitCode::SUCCESS,
@@ -124,5 +126,6 @@ async fn main() -> ExitCode {
             );
             ExitCode::from(1)
         }
-    }
+    };
+    exit
 }
