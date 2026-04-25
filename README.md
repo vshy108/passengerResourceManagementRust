@@ -24,6 +24,8 @@ src/
   domain/          # pure value objects, errors, events
   application/     # services + port traits (PassengerRepo, …)
   infrastructure/  # in-memory adapters, fake clock, event sinks
+  interface/       # composition root + HTTP adapter (feature-gated)
+  bin/             # binary entrypoints (serve)
 specs/             # numbered rules, invariants, scenarios
 tests/             # one integration file per spec slice
 web/               # optional React + TypeScript browser demo
@@ -49,6 +51,30 @@ Dependency direction is inward only:
 
 A TypeScript port of the same services with a small React UI lives in
 [`web/`](./web). See [`web/README.md`](./web/README.md) for run instructions.
+
+## HTTP server (optional)
+
+An axum-based HTTP adapter exposes the services over JSON. It is
+feature-gated so the core test path stays dependency-free.
+
+```bash
+cargo run --features http --bin serve
+# → PRMS HTTP server listening on http://127.0.0.1:8080
+```
+
+State is in-process and resets on restart. Quick smoke test:
+
+```bash
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/crew-leads
+curl -X POST http://127.0.0.1:8080/access \
+  -H 'Content-Type: application/json' \
+  -d '{"passenger_id":"ps-001","resource_id":"res-lounge"}'
+```
+
+Endpoint surface lives in [`src/interface/http.rs`](./src/interface/http.rs)
+and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
+CORS is open by default so the React demo can call it directly.
 
 ## Tooling
 
