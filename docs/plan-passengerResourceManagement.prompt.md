@@ -36,7 +36,7 @@ Build a **Passenger Resource Management System** for Spaceship X26 (Earth → Ma
 
 ---
 
-## 3. Domain Model (as shipped)
+## 3. Domain Model (planned)
 
 ```rust
 struct CrewLead   { id: Id, name: String }
@@ -131,29 +131,29 @@ Unit tests live in `#[cfg(test)] mod tests` blocks alongside the code
 they cover; cross-module flows live as integration tests in `tests/`.
 
 ### Level 1 tests
-- [x] `Tier::can_access` / `Tier::rank` — matrix of tier vs min_tier
+- [ ] `Tier::can_access` / `Tier::rank` — matrix of tier vs min_tier
   (in `domain/tier.rs`).
-- [x] `CrewLeadService::bootstrap` — rejects ≠ 3 leads
+- [ ] `CrewLeadService::bootstrap` — rejects ≠ 3 leads
   (in `application/crew_lead_service.rs`).
-- [x] `PassengerService::create` — assigns tier; rejects non-Crew-Lead actors.
-- [x] `ResourceService::create` — sets `min_tier`; rejects duplicates.
-- [x] `ResourceService::list_accessible_for(tier)` — filtered set with inheritance.
+- [ ] `PassengerService::create` — assigns tier; rejects non-Crew-Lead actors.
+- [ ] `ResourceService::create` — sets `min_tier`; rejects duplicates.
+- [ ] `ResourceService::list_accessible_for(tier)` — filtered set with inheritance.
 
 ### Level 2 tests
-- [x] `AccessService::use_resource` — Platinum allowed on Platinum-min resource.
-- [x] `AccessService::use_resource` — Silver denied on Gold/Platinum resources.
-- [x] `PassengerService::change_tier` — upgrade/downgrade takes effect immediately.
-- [x] Audit — `UsageEvent` emitted per attempt (allowed + denied); `AdminEvent`
+- [ ] `AccessService::use_resource` — Platinum allowed on Platinum-min resource.
+- [ ] `AccessService::use_resource` — Silver denied on Gold/Platinum resources.
+- [ ] `PassengerService::change_tier` — upgrade/downgrade takes effect immediately.
+- [ ] Audit — `UsageEvent` emitted per attempt (allowed + denied); `AdminEvent`
   emitted per successful admin mutation (`tests/audit.rs`).
 
 ### Level 3 tests
-- [x] `ReportingService::personal_history(passenger_id)` — insertion-order history.
-- [x] `ReportingService::aggregate_by_tier()` — counts grouped by
+- [ ] `ReportingService::personal_history(passenger_id)` — insertion-order history.
+- [ ] `ReportingService::aggregate_by_tier()` — counts grouped by
   `tier_at_attempt` (snapshot, not current tier).
-- [x] `ReportingService::top_resources(n)` — ranking + deterministic tie-break
+- [ ] `ReportingService::top_resources(n)` — ranking + deterministic tie-break
   by id; denied attempts ignored.
 
-Total: **89 tests green, 100% coverage** across all four layers.
+Target: 100% coverage across all four layers.
 
 ---
 
@@ -177,7 +177,7 @@ Total: **89 tests green, 100% coverage** across all four layers.
 
 ---
 
-## 8. Project Layout (as shipped)
+## 8. Project Layout (planned)
 
 ```
 passenger_resource_management/
@@ -276,52 +276,49 @@ passenger_resource_management/
 ---
 
 ## 12. "Done" Criteria — Status
-- [x] All three levels have passing tests (132 unit + integration on
-  the server; +7 on the web sub-project).
-- [x] CI green on a fresh clone (`fmt` + `clippy` + `nextest` + `llvm-cov`).
-- [x] README quickstart: `rustup show && cargo nextest run` (< 60 seconds
+- [ ] All three levels have passing tests.
+- [ ] CI green on a fresh clone (`fmt` + `clippy` + `nextest` + `llvm-cov`).
+- [ ] README quickstart: `rustup show && cargo nextest run` (< 60 seconds
   on a warm cargo cache).
-- [x] Code demonstrates: TDD (spec-ID-tagged commits), clean
+- [ ] Code demonstrates: TDD (spec-ID-tagged commits), clean
   architecture (domain → application → infrastructure → interface),
   clear naming, small focused modules, no leaky abstractions.
-- [x] All three §13 above-and-beyond extras delivered (persistence,
+- [ ] All three §13 above-and-beyond extras delivered (persistence,
   REST API, React UI).
 
 ---
 
 ## 13. Above-and-beyond — Status
-All three optional extras are **delivered**. Each was added on its own
+Three optional extras are **planned**. Each will be added on its own
 feature branch, merged via `--no-ff`, and landed without changing the
 domain layer.
 
-- [x] **JSON file persistence adapter** —
-  [`specs/08-persistence.md`](../specs/08-persistence.md) (`PE-R1..R6`).
+- [ ] **JSON file persistence adapter** —
+  `specs/08-persistence.md` (`PE-R1..R6`).
   JSONL admin + usage event sinks (via `serde` + `serde_json`) behind the
-  existing port traits; wired through `build_app(BuildAppOpts {
-  admin_sink, usage_sink, .. })`. Merged as `47542d8`.
-- [x] **REST layer (axum)** —
-  [`specs/09-http.md`](../specs/09-http.md) (`HT-R1..R6`). Thin `axum` +
+  port traits; wired through `build_app(BuildAppOpts {
+  admin_sink, usage_sink, .. })`.
+- [ ] **REST layer (axum)** —
+  `specs/09-http.md` (`HT-R1..R6`). Thin `axum` +
   `tokio` adapter over the application services; `cargo run --bin serve`
-  starts the API. Merged as `ef18253`.
-- [x] **Interactive React UI against the live REST API** —
-  [`specs/11-web-interactive.md`](../specs/11-web-interactive.md)
-  (`WB-R1..R6`). The initial static-snapshot page (originally
-  `specs/10-web.md`) was superseded by a full SPA that drives every
-  administrative and access-check action over HTTP (CORS enabled on
-  the server). Isolated `web/` sub-project (Vite + React 18); Vite
+  starts the API.
+- [ ] **Interactive React UI against the live REST API** —
+  `specs/11-web-interactive.md` (`WB-R1..R6`). A full SPA that drives
+  every administrative and access-check action over HTTP (CORS enabled
+  on the server). Isolated `web/` sub-project (Vite + React 18); Vite
   dev server proxies `/api/*` to `http://localhost:3000`.
-- [x] **Built-in demo world** —
-  [`specs/12-demo-seed.md`](../specs/12-demo-seed.md) (`DS-R1..R5`).
+- [ ] **Built-in demo world** —
+  `specs/12-demo-seed.md` (`DS-R1..R5`).
   Canonical population from the glossary: 3 Crew Leads, 3 Passengers
   across every tier, 6 onboard facilities. Exposed as `seed_demo_world`
   (reused by `cargo run --bin serve -- --seed` / `PRMS_SEED=1`) and as
   a “Load demo data” button in the React bootstrap screen that composes
   the existing REST endpoints — no new server route.
 
-Guardrails honoured:
-- Core (Levels 1–3) was green before any of these started.
-- Each addition has its own spec file (`specs/08..12`) written first.
-- Domain tests were not modified; 100 % coverage maintained throughout.
+Guardrails:
+- Core (Levels 1–3) must be green before any of these start.
+- Each addition gets its own spec file (`specs/08..12`) written first.
+- Domain tests must not be modified; 100% coverage maintained throughout.
 
 ---
 
@@ -350,10 +347,10 @@ expected, but does not lower the bar.
   - Level 1 / 2 / 3 feature checklist with status.
   - **Design decisions & trade-offs** section.
   - **AI usage disclosure** (see below).
-- `AGENTS.md` (already present) — engineering conventions.
-- `specs/` directory (already present) — drives implementation.
-- `.github/workflows/ci.yml` (already present) — fmt + clippy + nextest + llvm-cov.
-- `rust-toolchain.toml` (already present) — pins Rust toolchain.
+- `AGENTS.md` — engineering conventions.
+- `specs/` directory — drives implementation.
+- `.github/workflows/ci.yml` — fmt + clippy + nextest + llvm-cov.
+- `rust-toolchain.toml` — pins Rust toolchain.
 - Clean git history with conventional commits, signed where possible.
 - No `target/` in the ZIP. Include `Cargo.lock`.
 
