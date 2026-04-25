@@ -50,9 +50,35 @@ export function buildWorld(): World {
   passengers.create(aria, passengerId("p-002"), "Jonas Reed", "Gold");
   passengers.create(aria, passengerId("p-003"), "Lila Soren", "Platinum");
 
-  resources.create(aria, resourceId("r-pool"), "Hydro Lounge", "wellness", "Silver");
-  resources.create(aria, resourceId("r-deck"), "Observation Deck", "leisure", "Gold");
-  resources.create(aria, resourceId("r-vault"), "Captain's Vault", "exclusive", "Platinum");
+  resources.create(
+    aria,
+    resourceId("r-pool"),
+    "Hydro Lounge",
+    "wellness",
+    "Silver",
+  );
+  resources.create(
+    aria,
+    resourceId("r-deck"),
+    "Observation Deck",
+    "leisure",
+    "Gold",
+  );
+  resources.create(
+    aria,
+    resourceId("r-vault"),
+    "Captain's Vault",
+    "exclusive",
+    "Platinum",
+  );
 
-  return { clock, crewLeads, passengers, resources, access, reporting, adminEvents };
+  return {
+    clock,
+    crewLeads,
+    passengers,
+    resources,
+    access,
+    reporting,
+    adminEvents,
+  };
 }

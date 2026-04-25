@@ -25,7 +25,8 @@ export class ResourceService {
   ): Result<Resource> {
     const guard = requireCrewLead(actor);
     if (!guard.ok) return guard;
-    if (this.active.some((r) => r.id === id)) return err("ResourceAlreadyExists");
+    if (this.active.some((r) => r.id === id))
+      return err("ResourceAlreadyExists");
     const r: Resource = { id, name, category, minTier, deletedAt: null };
     this.active.push(r);
     this.audit(guard.value, "ResourceCreated", id, `min_tier=${minTier}`);
@@ -38,7 +39,12 @@ export class ResourceService {
     const slot = this.active.find((r) => r.id === id);
     if (!slot) return err("ResourceNotFound");
     slot.minTier = newTier;
-    this.audit(guard.value, "ResourceMinTierChanged", id, `min_tier=${newTier}`);
+    this.audit(
+      guard.value,
+      "ResourceMinTierChanged",
+      id,
+      `min_tier=${newTier}`,
+    );
     return ok(undefined);
   }
 

@@ -17,10 +17,16 @@ export class PassengerService {
   ) {}
 
   // PS-R1.
-  create(actor: Actor, id: PassengerId, name: string, tier: Tier): Result<Passenger> {
+  create(
+    actor: Actor,
+    id: PassengerId,
+    name: string,
+    tier: Tier,
+  ): Result<Passenger> {
     const guard = requireCrewLead(actor);
     if (!guard.ok) return guard;
-    if (this.active.some((p) => p.id === id)) return err("PassengerAlreadyExists");
+    if (this.active.some((p) => p.id === id))
+      return err("PassengerAlreadyExists");
     const p: Passenger = { id, name, tier, deletedAt: null };
     this.active.push(p);
     this.emitEvent(guard.value, "PassengerCreated", p.id, `tier=${tier}`);

@@ -6,4 +6,7 @@ export type Actor =
   | { kind: "Passenger"; id: PassengerId };
 
 export const asCrewLead = (id: CrewLeadId): Actor => ({ kind: "CrewLead", id });
-export const asPassenger = (id: PassengerId): Actor => ({ kind: "Passenger", id });
+export const asPassenger = (id: PassengerId): Actor => ({
+  kind: "Passenger",
+  id,
+});

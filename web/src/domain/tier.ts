@@ -23,5 +23,7 @@ export function canAccess(passenger: Tier, min: Tier): boolean {
 
 // TP-E1 — case-sensitive parse.
 export function parseTier(value: string): Tier | null {
-  return (ALL_TIERS as readonly string[]).includes(value) ? (value as Tier) : null;
+  return (ALL_TIERS as readonly string[]).includes(value)
+    ? (value as Tier)
+    : null;
 }

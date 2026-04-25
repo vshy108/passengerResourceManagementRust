@@ -30,11 +30,15 @@ export class ReportingService {
     if (n <= 0) return [];
     const counts = new Map<string, number>();
     for (const e of this.access.history()) {
-      if (e.allowed) counts.set(e.resourceId, (counts.get(e.resourceId) ?? 0) + 1);
+      if (e.allowed)
+        counts.set(e.resourceId, (counts.get(e.resourceId) ?? 0) + 1);
     }
     return [...counts.entries()]
       .map(([resourceId, allowed]) => ({ resourceId, allowed }))
-      .sort((a, b) => b.allowed - a.allowed || a.resourceId.localeCompare(b.resourceId))
+      .sort(
+        (a, b) =>
+          b.allowed - a.allowed || a.resourceId.localeCompare(b.resourceId),
+      )
       .slice(0, n);
   }
 }
