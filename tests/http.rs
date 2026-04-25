@@ -535,3 +535,258 @@ async fn reset_rejects_unknown_actor_with_403() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["code"], "UnauthorizedActor");
 }
+
+// ---------- coverage: error branches + missing list path ---------------
+
+#[tokio::test]
+async fn list_resources_returns_three_seeded() {
+    let app = app();
+    let (status, body) = send(&app, req(Method::GET, "/resources", None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn create_passenger_duplicate_id_returns_409() {
+    let app = app();
+    let (status, body) = send(
+        &app,
+        req(
+            Method::POST,
+            "/passengers",
+            Some(json!({
+                "actor_id": ARIA,
+                "id": "ps-001",
+                "name": "Dup",
+                "tier": "Silver"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "PassengerAlreadyExists");
+}
+
+#[tokio::test]
+async fn create_resource_duplicate_id_returns_409() {
+    let app = app();
+    let (status, body) = send(
+        &app,
+        req(
+            Method::POST,
+            "/resources",
+            Some(json!({
+                "actor_id": ARIA,
+                "id": "res-lounge",
+                "name": "Dup",
+                "category": "test",
+                "min_tier": "Silver"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "ResourceAlreadyExists");
+}
+
+#[tokio::test]
+async fn change_tier_unknown_passenger_returns_404() {
+    let app = app();
+    let (status, body) = send(
+        &app,
+        req(
+            Method::PATCH,
+            "/passengers/ps-zzz/tier",
+            Some(json!({"actor_id": ARIA, "tier": "Gold"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "PassengerNotFound");
+}
+
+#[tokio::test]
+async fn delete_unknown_passenger_returns_404() {
+    let app = app();
+    let (status, body) = send(
+        &app,
+        req(
+            Method::DELETE,
+            "/passengers/ps-zzz",
+            Some(json!({"actor_id": ARIA})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "PassengerNotFound");
+}
+
+#[tokio::test]
+async fn change_min_tier_unknown_resource_returns_404() {
+    let app = app();
+    let (status, body) = send(
+        &app,
+        req(
+            Method::PATCH,
+            "/resources/res-zzz/min-tier",
+            Some(json!({"actor_id": ARIA, "tier": "Gold"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "ResourceNotFound");
+}
+
+#[tokio::test]
+async fn delete_unknown_resource_returns_404() {
+    let app = app();
+    let (status, body) = send(
+        &app,
+        req(
+            Method::DELETE,
+            "/resources/res-zzz",
+            Some(json!({"actor_id": ARIA})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "ResourceNotFound");
+}
+
+#[tokio::test]
+async fn replace_crew_lead_unknown_id_returns_404() {
+    let app = app();
+    let (status, body) = send(
+        &app,
+        req(
+            Method::PUT,
+            "/crew-leads/cl-zzz",
+            Some(json!({
+                "actor_id": ARIA,
+                "new_lead": {"id": "cl-y", "name": "Y"}
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "CrewLeadNotFound");
+}
+
+#[tokio::test]
+async fn audit_log_serialises_every_admin_action_string() {
+    // Drive every distinct AdminAction variant through the API so the
+    // string-mapping arms are exercised.
+    let app = app();
+
+    // PassengerCreated, PassengerTierChanged, PassengerDeleted
+    let _ = send(
+        &app,
+        req(
+            Method::POST,
+            "/passengers",
+            Some(json!({
+                "actor_id": ARIA,
+                "id": "ps-cov",
+                "name": "C",
+                "tier": "Silver"
+            })),
+        ),
+    )
+    .await;
+    let _ = send(
+        &app,
+        req(
+            Method::PATCH,
+            "/passengers/ps-cov/tier",
+            Some(json!({"actor_id": ARIA, "tier": "Gold"})),
+        ),
+    )
+    .await;
+    let _ = send(
+        &app,
+        req(
+            Method::DELETE,
+            "/passengers/ps-cov",
+            Some(json!({"actor_id": ARIA})),
+        ),
+    )
+    .await;
+
+    // ResourceCreated, ResourceMinTierChanged, ResourceDeleted
+    let _ = send(
+        &app,
+        req(
+            Method::POST,
+            "/resources",
+            Some(json!({
+                "actor_id": ARIA,
+                "id": "res-cov",
+                "name": "C",
+                "category": "x",
+                "min_tier": "Silver"
+            })),
+        ),
+    )
+    .await;
+    let _ = send(
+        &app,
+        req(
+            Method::PATCH,
+            "/resources/res-cov/min-tier",
+            Some(json!({"actor_id": ARIA, "tier": "Gold"})),
+        ),
+    )
+    .await;
+    let _ = send(
+        &app,
+        req(
+            Method::DELETE,
+            "/resources/res-cov",
+            Some(json!({"actor_id": ARIA})),
+        ),
+    )
+    .await;
+
+    // CrewLeadReplaced
+    let _ = send(
+        &app,
+        req(
+            Method::PUT,
+            "/crew-leads/cl-aria",
+            Some(json!({
+                "actor_id": ARIA,
+                "new_lead": {"id": "cl-aria2", "name": "A2"}
+            })),
+        ),
+    )
+    .await;
+
+    let (status, body) = send(&app, req(Method::GET, "/audit", None)).await;
+    assert_eq!(status, StatusCode::OK);
+    let actions: Vec<&str> = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["action"].as_str().unwrap())
+        .collect();
+    for expected in [
+        "CrewLeadBootstrapped",
+        "PassengerCreated",
+        "PassengerTierChanged",
+        "PassengerDeleted",
+        "ResourceCreated",
+        "ResourceMinTierChanged",
+        "ResourceDeleted",
+        "CrewLeadReplaced",
+    ] {
+        assert!(actions.contains(&expected), "missing {expected}");
+    }
+}
+
+#[tokio::test]
+async fn get_resource_returns_404_for_unknown() {
+    let app = app();
+    let (status, body) = send(&app, req(Method::GET, "/resources/res-zzz", None)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "ResourceNotFound");
+}
