@@ -67,5 +67,12 @@ cargo run --features http --bin serve
 
 The panel auto-pings `GET /health`, then loads passengers, resources,
 usage events and the by-tier report from the running server. The
-"POST /access" button drives the live `AccessService`. Override the
-base URL with `VITE_API_BASE=http://host:port npm run dev`.
+"POST /access" button drives the live `AccessService`. The "Reset
+server state" button calls `POST /reset` to rebuild the demo world,
+and an "Accessible resources for tier" section calls
+`GET /resources/accessible?tier=…`. Override the base URL with
+`VITE_API_BASE=http://host:port npm run dev`.
+
+The in-browser panels (top of the page) and the live Rust server
+panel keep **independent** state — mutating one does not affect the
+other.
