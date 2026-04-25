@@ -29,7 +29,10 @@ impl InMemoryAdminEventSink {
     /// while writing, which is unrecoverable for an audit sink.
     #[must_use]
     pub fn snapshot(&self) -> Vec<AdminEvent> {
-        self.inner.lock().expect("admin sink mutex poisoned").clone()
+        self.inner
+            .lock()
+            .expect("admin sink mutex poisoned")
+            .clone()
     }
 
     /// # Panics
