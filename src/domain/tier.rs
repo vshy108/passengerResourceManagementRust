@@ -22,15 +22,18 @@ impl Tier {
     /// TP-R1 — numeric rank used for ordering.
     #[must_use]
     pub fn rank(self) -> u8 {
-        todo!("TP-R1: implement rank")
+        match self {
+            Tier::Silver => 1,
+            Tier::Gold => 2,
+            Tier::Platinum => 3,
+        }
     }
 
     /// TP-R2 — `self` (passenger tier) can access a resource whose
     /// minimum required tier is `resource_min_tier`.
     #[must_use]
     pub fn can_access(self, resource_min_tier: Tier) -> bool {
-        let _ = resource_min_tier;
-        todo!("TP-R2: implement can_access")
+        self.rank() >= resource_min_tier.rank()
     }
 }
 
@@ -39,8 +42,12 @@ impl TryFrom<&str> for Tier {
 
     /// TP-E1 — case-sensitive parse from the canonical capitalised form.
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let _ = value;
-        todo!("TP-E1: implement TryFrom<&str>")
+        match value {
+            "Silver" => Ok(Tier::Silver),
+            "Gold" => Ok(Tier::Gold),
+            "Platinum" => Ok(Tier::Platinum),
+            other => Err(InvalidTier(other.to_owned())),
+        }
     }
 }
 
