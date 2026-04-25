@@ -43,7 +43,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-deny
       - name: cargo deny
-        run: cargo deny check advisories bans licenses sources
+        # --all-features so the audit covers the http dep tree too.
+        run: cargo deny --all-features check advisories bans licenses sources
 
   web:
     runs-on: ubuntu-latest
