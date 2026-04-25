@@ -106,7 +106,9 @@ CORS is open by default so the React demo can call it directly.
 
 - Rust 2024, stable channel pinned in [`rust-toolchain.toml`](./rust-toolchain.toml)
 - `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
-- Coverage: `cargo llvm-cov nextest`
+- Coverage: `cargo llvm-cov nextest --features http --ignore-filename-regex 'src/bin/'`
+  — 98%+ line coverage; CI fails below that threshold. The `serve`
+  binary entrypoint is excluded (it boots a real socket).
 - CI: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs fmt, clippy
   (default + `--features http`), nextest (default + `--features http`), and
   the web build on every push and PR.

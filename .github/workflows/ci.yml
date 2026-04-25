@@ -19,6 +19,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cargo-llvm-cov
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy (default features)
@@ -29,6 +30,11 @@ jobs:
         run: cargo nextest run
       - name: nextest (--features http)
         run: cargo nextest run --features http
+      - name: coverage
+        run: |
+          cargo llvm-cov nextest --features http \
+            --ignore-filename-regex 'src/bin/' \
+            --fail-under-lines 98
 
   web:
     runs-on: ubuntu-latest
