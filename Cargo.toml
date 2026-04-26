@@ -14,7 +14,7 @@ http = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:serde", "dep:serde_json"
 
 [dependencies]
 thiserror = "2"
-axum = { version = "0.7", optional = true }
+axum = { version = "0.8", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"], optional = true }
 tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "util"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }

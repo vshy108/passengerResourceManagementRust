@@ -75,24 +75,24 @@ pub fn router_with(state: AppState, cors_origins: CorsOrigins) -> Router {
         // crew leads
         .route("/crew-leads", get(list_crew_leads).post(add_crew_lead))
         .route(
-            "/crew-leads/:old_id",
+            "/crew-leads/{old_id}",
             put(replace_crew_lead).delete(remove_crew_lead),
         )
         // passengers
         .route("/passengers", get(list_passengers).post(create_passenger))
         .route(
-            "/passengers/:id",
+            "/passengers/{id}",
             get(get_passenger).delete(soft_delete_passenger),
         )
-        .route("/passengers/:id/tier", patch(change_passenger_tier))
+        .route("/passengers/{id}/tier", patch(change_passenger_tier))
         // resources
         .route("/resources", get(list_resources).post(create_resource))
         .route("/resources/accessible", get(list_accessible_resources))
         .route(
-            "/resources/:id",
+            "/resources/{id}",
             get(get_resource).delete(soft_delete_resource),
         )
-        .route("/resources/:id/min-tier", patch(change_resource_min_tier))
+        .route("/resources/{id}/min-tier", patch(change_resource_min_tier))
         // access
         .route("/access", post(use_resource))
         // audit + usage
@@ -102,7 +102,7 @@ pub fn router_with(state: AppState, cors_origins: CorsOrigins) -> Router {
         .route("/reports/by-tier", get(report_by_tier))
         .route("/reports/top-resources", get(report_top_resources))
         .route(
-            "/reports/history/:passenger_id",
+            "/reports/history/{passenger_id}",
             get(report_personal_history),
         )
         // admin

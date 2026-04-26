@@ -19,6 +19,10 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // Demo panels legitimately fetch on mount / on dep change and stage
+      // the response into state. The rule's recommended escape hatches
+      // (useSyncExternalStore, useEffectEvent) don't fit a tiny demo UI.
+      "react-hooks/set-state-in-effect": "off",
       "react-refresh/only-export-components": [
         "warn",
         { allowConstantExport: true },
