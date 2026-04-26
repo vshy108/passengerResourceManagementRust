@@ -134,6 +134,65 @@ and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
 
 See [`AGENTS.md`](./AGENTS.md) for full contribution rules.
 
+## Approach, tradeoffs, and assumptions
+
+**Approach.** Spec-first, hexagonal layering with the dependency arrow
+pointing inward (`interface → application → domain`, with
+`infrastructure` plugged into `application` via traits). Every spec
+file under [`specs/`](./specs) has numbered rules / scenarios; tests
+are named after those scenario IDs (e.g. `tp_r1_s10_…`) so a reviewer
+can map a failing test back to the rule it enforces. Red → green →
+refactor; one commit per spec ID where practical.
+
+**Domain purity.** `src/domain/` has `#![forbid(unsafe_code)]`, no
+I/O, no clocks, no logging, and no third-party crates beyond
+`thiserror` / `chrono`. IDs are newtypes (`PassengerId(Uuid)`, …) so
+the type system catches mix-ups at compile time. Errors are a single
+`#[non_exhaustive]` `DomainError` enum — the compiler points at every
+`match` site whenever a variant is added.
+
+**Tradeoffs we made deliberately.**
+- **In-memory adapters only.** Persistence is a `Mutex<World>` behind
+  the repository traits. Adding a real DB is a port-swap, not a
+  rewrite, but we did not ship one because the brief did not ask for
+  durability. See `src/infrastructure/`.
+- **No authn/authz.** Admin endpoints accept `actor_id` at face value
+  and verify only that it maps to a known crew lead. Real auth was
+  out of scope; the `AccessPolicy` strategy makes adding it later a
+  matter of inserting a guard at the boundary, not rewriting services.
+- **`PartialOrd` via `Tier::rank()`.** We compare tiers through an
+  explicit `rank()` rather than deriving `Ord` on the enum so the
+  ordering is documented in code and stays stable if variants are
+  reordered.
+- **Two demo surfaces (CLI + HTTP + React).** The HTTP adapter and the
+  web demo are gated behind the `http` Cargo feature and a separate
+  `web/` workspace so the core crate stays dependency-light. CI runs
+  both feature configurations.
+- **OpenAPI is generated, not handwritten.** `utoipa` derives the
+  schema from the same DTOs the handlers use, so the spec cannot
+  drift from the wire format.
+- **Coverage gate at 98% lines** (`src/bin/serve.rs` excluded — it
+  binds a real socket). Higher gates encouraged us to delete dead
+  code rather than write tests for unreachable branches.
+
+**Assumptions.**
+- A passenger keeps the same tier between the moment of access and
+  the moment the `UsageEvent` is recorded — we snapshot
+  `tier_at_attempt` and `min_tier_at_attempt` on the event so audit
+  history is stable even if tiers change later.
+- Soft delete is sufficient for "remove" operations: passengers and
+  resources are flagged inactive but never physically purged, so
+  audit trails remain intact (`AGENTS.md` §3, "Every access attempt
+  emits a `UsageEvent`").
+- Time only flows forward; the injected `Clock` trait returns
+  monotonic timestamps. Tests use `FakeClock` to advance time
+  deterministically.
+- IDs supplied by clients are unique and stable within a process
+  lifetime. The HTTP layer rejects malformed IDs at the boundary via
+  `TryFrom`.
+- A single-process deployment is acceptable for the demo; horizontal
+  scaling (shared state, leader election) is out of scope.
+
 ## Limitations
 
 The HTTP server is a demo affordance, not a production target:
