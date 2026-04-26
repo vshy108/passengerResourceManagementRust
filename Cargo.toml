@@ -1,6 +1,6 @@
 [package]
 name = "passenger_resource_management"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 description = "Spaceship X26 Passenger Resource Management System"
 license = "MIT"
