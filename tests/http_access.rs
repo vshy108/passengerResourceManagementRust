@@ -1,3 +1,7 @@
+// HTTP integration tests for the access endpoint. The full pattern
+// for this file is documented in `tests/http_health.rs`; from here on
+// each http_*.rs file just calls `app()` + `send(req(...))` and
+// asserts on `(status, body)`.
 #![cfg(feature = "http")]
 
 mod http_common;

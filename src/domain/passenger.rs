@@ -21,5 +21,9 @@ pub struct Passenger {
     pub tier: Tier,
     /// Soft-delete marker. `None` means the record is active. Once set
     /// it is immutable (PS-I2).
+    // `Option<T>` is Rust's null-safe "maybe a value":
+    //   - Some(t) -> a value is present
+    //   - None    -> no value
+    // The compiler forces you to handle both cases (no NullPointerException).
     pub deleted_at: Option<Timestamp>,
 }

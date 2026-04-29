@@ -1,3 +1,6 @@
+// HTTP integration tests for /resources endpoints. Mirrors the
+// passenger tests; verifies tier minimums, duplicates, and updates.
+// See `tests/http_health.rs` for harness details.
 #![cfg(feature = "http")]
 
 mod http_common;

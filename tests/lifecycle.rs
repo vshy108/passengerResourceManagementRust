@@ -2,6 +2,10 @@
 //! across all aggregates in one scenario, complementing the per-rule
 //! tests in `tests/{access,passenger,resource,…}.rs`.
 
+// Per-rule tests prove ONE thing each (good for pinpointing failures);
+// this lifecycle test proves the WHOLE FLOW composes correctly. Both
+// styles complement each other — keep both.
+
 use passenger_resource_management::application::access_service::AccessService;
 use passenger_resource_management::application::passenger_service::PassengerService;
 use passenger_resource_management::application::ports::UsageEventSource;

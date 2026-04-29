@@ -1,5 +1,11 @@
 //! Integration tests for `specs/03-passenger.md` (PS-S1..S10).
 
+// Note `fn svc() -> PassengerService<FakeClock>`. The test SHADOWS the
+// outer `svc` *function* with a local `let mut svc = svc();` *binding*
+// inside each test. Shadowing is legal and idiomatic in Rust — the
+// later binding hides the earlier name in this scope. Some readers
+// find it confusing; rename if it bothers you.
+
 use passenger_resource_management::application::passenger_service::PassengerService;
 use passenger_resource_management::domain::actor::Actor;
 use passenger_resource_management::domain::crew_lead::CrewLeadId;

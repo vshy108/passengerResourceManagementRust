@@ -1,5 +1,21 @@
 //! Integration tests for `specs/05-access.md` (AC-S1..S10).
 
+// INTEGRATION TESTS PRIMER:
+// - This file lives directly under `tests/`, so Cargo compiles it as
+//   its own *separate* binary linked against the library. It can only
+//   reach `pub` items — exactly like a real downstream consumer would.
+// - Every `use passenger_resource_management::...` path uses the full
+//   crate name (replacing hyphens with underscores). From inside
+//   `src/` we'd write `use crate::...` instead.
+// - Test names mirror spec scenario IDs (AC-S1, AC-S2, ...) per
+//   AGENTS.md §4 — failures point straight at the failing rule.
+// - `#[test]` functions panic to fail; a panic anywhere in the test
+//   body (incl. `unwrap`/`expect`) is treated as a test failure.
+//
+// Notice the SAME `World` struct name as in `composition_root.rs` —
+// that's a different type. Test files are independent crates: names
+// only collide if you import them, which we don't.
+
 use passenger_resource_management::application::access_service::AccessService;
 use passenger_resource_management::application::passenger_service::PassengerService;
 use passenger_resource_management::application::ports::UsageEventSource;
@@ -14,6 +30,10 @@ use passenger_resource_management::domain::usage_event::Outcome;
 use passenger_resource_management::infrastructure::fake_clock::FakeClock;
 use passenger_resource_management::infrastructure::in_memory_usage_event_sink::InMemoryUsageEventSink;
 
+// Test fixtures: tiny helpers that hide repetitive setup so each test
+// reads as the SCENARIO it's actually exercising. Naming them tersely
+// (`admin()`, `pa()`, `world()`) is fine in test code — they wouldn't
+// pass code review in production.
 fn admin() -> Actor {
     Actor::CrewLead(CrewLeadId::from("a"))
 }
@@ -21,6 +41,9 @@ fn pa(id: &str) -> Actor {
     Actor::Passenger(PassengerId::from(id))
 }
 
+// Local `World` struct — bundles the three services so tests can
+// destructure them in one place. NOT the same as the `World` in
+// `composition_root.rs`; tests are separate compilation units.
 struct World {
     passengers: PassengerService<FakeClock>,
     resources: ResourceService<FakeClock>,
@@ -65,6 +88,8 @@ fn seed_resource(w: &mut World, id: &str, t: Tier) {
 
 #[test]
 fn ac_s1_crew_lead_actor_unauthorized_no_event() {
+    // Each test owns its OWN `World` — fresh state, no shared globals,
+    // so tests can run in parallel safely (the default in Rust).
     let mut w = world();
     seed_passenger(&mut w, "p1", Tier::Silver);
     seed_resource(&mut w, "r1", Tier::Silver);
@@ -74,7 +99,12 @@ fn ac_s1_crew_lead_actor_unauthorized_no_event() {
         &w.resources,
         &ResourceId::from("r1"),
     );
+    // `Result::err()` -> `Option<E>`. We assert against an EXACT error
+    // variant; if the production code changes which error it returns,
+    // this test will fail and pinpoint the regression.
     assert_eq!(res.err(), Some(DomainError::UnauthorizedActor));
+    // No usage event should have been emitted on the unauthorised path
+    // — `is_empty()` asserts that explicitly.
     assert!(w.access.sink().list().is_empty());
 }
 

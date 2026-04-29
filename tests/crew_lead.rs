@@ -1,5 +1,10 @@
 //! Integration tests for `specs/02-crew-lead.md` (CL-S1..S11).
 
+// `to_vec()` on a slice (`svc.list()` returns `&[CrewLead]`) clones
+// every element into a new `Vec<CrewLead>`. Used here to capture a
+// snapshot before a mutation, then assert the state is UNCHANGED on
+// failure — comparing slices via `assert_eq!(svc.list(), before.as_slice())`.
+
 use passenger_resource_management::application::crew_lead_service::CrewLeadService;
 use passenger_resource_management::domain::crew_lead::{CrewLead, CrewLeadId};
 use passenger_resource_management::domain::errors::DomainError;

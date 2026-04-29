@@ -1,5 +1,13 @@
+// File-level `#![cfg(feature = "http")]`: when the `http` Cargo
+// feature is OFF, this entire file compiles to nothing — no test
+// binary, no axum dependency. Pairs with the same gate in `src/`.
 #![cfg(feature = "http")]
 
+// `mod http_common;` looks for `tests/http_common/mod.rs` (or
+// `tests/http_common.rs`) and includes it as a private module. This
+// is HOW we share the `app()`/`req()`/`send()` helpers across each
+// `tests/http_*.rs` binary; Cargo would otherwise compile the helper
+// file as its OWN test binary, which we don't want.
 mod http_common;
 
 use axum::{
@@ -7,16 +15,25 @@ use axum::{
     http::{Method, Request, StatusCode},
 };
 use http_body_util::BodyExt;
+// `serde_json::json!` is a macro that builds a `Value` from JSON-like
+// syntax: `json!({"a": 1})` -> a `Value::Object` with one entry.
+// Lifesaver in tests — no need to define a struct just to make a request.
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use http_common::{ARIA, app, req, send};
 
+// `#[tokio::test]` is the async equivalent of `#[test]` — the macro
+// wraps the test in a tokio runtime so we can `.await` futures inside.
+// REQUIRED whenever the test calls async axum/tower code.
 #[tokio::test]
 async fn health_returns_ok() {
     let app = app();
     let (status, body) = send(&app, req(Method::GET, "/health", None)).await;
     assert_eq!(status, StatusCode::OK);
+    // Indexing a `serde_json::Value` is dynamic — returns a default
+    // `Value::Null` for missing keys instead of panicking. Convert with
+    // `.as_str()` / `.as_array()` / etc., each returning Option.
     assert_eq!(body, Value::String("ok".into()));
 }
 
@@ -115,6 +132,9 @@ async fn unknown_tier_string_is_rejected() {
 #[tokio::test]
 async fn oversized_body_is_rejected_with_413() {
     let app = app();
+    // `"x".repeat(n)` -> a String of `n` copies. Used here to build a
+    // body deliberately larger than the 64 KiB cap set in http.rs, to
+    // verify the `DefaultBodyLimit` middleware rejects it with 413.
     let huge = "x".repeat(70 * 1024);
     let body = json!({
         "actor_id": ARIA,

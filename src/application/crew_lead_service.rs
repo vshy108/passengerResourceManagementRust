@@ -9,11 +9,23 @@ use crate::domain::errors::DomainError;
 ///
 /// Exactly three Crew Leads exist after `bootstrap` (CL-I1).
 pub struct CrewLeadService {
+    // `Vec<T>` is Rust's growable heap-allocated array (like
+    // `ArrayList`/`std::vector`). Iteration order = insertion order.
     leads: Vec<CrewLead>,
+    // Audit support is OPT-IN: `None` for the plain ctor, `Some(...)`
+    // when constructed via `bootstrap_audited`. Keeping it Option means
+    // callers that don't need audit don't pay for it.
     audit: Option<AuditCfg>,
 }
 
+// `struct` (no `pub`) = visible only inside this module — implementation
+// detail of the service.
 struct AuditCfg {
+    // `Box<dyn Trait>` is a *trait object* — heap-allocated, dynamic
+    // dispatch. We use it here (instead of a generic parameter on
+    // CrewLeadService) so the audit type doesn't pollute every signature
+    // for callers who don't care about audit. The cost is one virtual
+    // call per `now()` / `append()` — negligible at this granularity.
     clock: Box<dyn Clock>,
     sink: Box<dyn AdminEventSink>,
     next_id: u64,
@@ -25,11 +37,15 @@ impl CrewLeadService {
     /// # Errors
     /// Returns `DomainError::CrewLeadBootstrapInvalid` (CL-E5) if the
     /// input count is not 3 or contains duplicate ids.
+    // Associated function (no `self`) — called as `CrewLeadService::bootstrap(...)`.
+    // Acts as a *named constructor*.
     pub fn bootstrap(leads: Vec<CrewLead>) -> Result<Self, DomainError> {
         if leads.len() != 3 {
             return Err(DomainError::CrewLeadBootstrapInvalid);
         }
-        // CL-I2 — reject duplicate ids.
+        // CL-I2 — reject duplicate ids. O(n²) is fine for n=3.
+        // `0..leads.len()` is a half-open range (0,1,2); `(i+1)..len`
+        // skips already-compared pairs.
         for i in 0..leads.len() {
             for j in (i + 1)..leads.len() {
                 if leads[i].id == leads[j].id {
@@ -44,6 +60,8 @@ impl CrewLeadService {
     ///
     /// # Errors
     /// Returns `DomainError::CrewLeadLimitReached` (CL-E1).
+    // Leading underscore on `_lead` tells the compiler "I'm intentionally
+    // ignoring this parameter" — silences the unused-variable warning.
     pub fn add(&mut self, _lead: CrewLead) -> Result<(), DomainError> {
         Err(DomainError::CrewLeadLimitReached)
     }
@@ -64,11 +82,15 @@ impl CrewLeadService {
     /// - `DomainError::CrewLeadAlreadyExists` (CL-E3) if `new_lead.id`
     ///   matches a different existing lead.
     pub fn replace(&mut self, old_id: &CrewLeadId, new_lead: CrewLead) -> Result<(), DomainError> {
+        // `position` returns `Option<usize>` — index of the first match.
+        // `let-else` bails out cleanly on None; on Some, `slot` is bound.
         let Some(slot) = self.leads.iter().position(|l| l.id == *old_id) else {
             return Err(DomainError::CrewLeadNotFound);
         };
         // CL-E3 — reject if `new_lead.id` collides with a *different*
         // existing lead. Replacing in place (same id) is allowed.
+        // `enumerate()` pairs each item with its index.
+        // `any(|...| ...)` short-circuits on first match.
         if self
             .leads
             .iter()
@@ -77,6 +99,7 @@ impl CrewLeadService {
         {
             return Err(DomainError::CrewLeadAlreadyExists);
         }
+        // Index assignment — replaces the element at `slot` in place.
         self.leads[slot] = new_lead;
         Ok(())
     }
@@ -84,6 +107,9 @@ impl CrewLeadService {
     /// CL-R6 — current Crew Leads in insertion order.
     #[must_use]
     pub fn list(&self) -> &[CrewLead] {
+        // `&self.leads` (a `&Vec<CrewLead>`) auto-coerces to `&[CrewLead]`
+        // (a slice). Slice is a smaller, more general API — callers that
+        // only need to read benefit.
         &self.leads
     }
 
@@ -98,6 +124,9 @@ impl CrewLeadService {
         clock: Box<dyn Clock>,
         sink: Box<dyn AdminEventSink>,
     ) -> Result<Self, DomainError> {
+        // The `?` operator: if `bootstrap` returns Err, the whole
+        // function returns that Err immediately. Otherwise the Ok value
+        // is unwrapped into `svc`.
         let mut svc = Self::bootstrap(leads)?;
         let mut audit = AuditCfg {
             clock,
@@ -108,6 +137,8 @@ impl CrewLeadService {
         // event; this is a synthetic but stable choice (AU-R2 only
         // requires `actor_id` be a Crew Lead id).
         let actor_id = svc.leads[0].id.clone();
+        // `.0` accesses the inner `String` of the `CrewLeadId(pub String)`
+        // tuple struct.
         let target_id = actor_id.0.clone();
         let event = AdminEvent {
             id: audit.next_id,
@@ -116,6 +147,8 @@ impl CrewLeadService {
             target_kind: TargetKind::CrewLead,
             target_id,
             timestamp: audit.clock.now(),
+            // `format!` is `println!` that returns a String instead of
+            // printing. `{}` formats with Display, `{:?}` with Debug.
             details: Some(format!("count={}", svc.leads.len())),
         };
         audit.next_id += 1;
@@ -135,8 +168,13 @@ impl CrewLeadService {
         old_id: &CrewLeadId,
         new_lead: CrewLead,
     ) -> Result<(), DomainError> {
+        // Clone BEFORE the call because `new_lead` is moved into
+        // `replace` and we still need its id afterwards.
         let new_id = new_lead.id.clone();
         self.replace(old_id, new_lead)?;
+        // `if let Some(...)` = run this block only when audit is enabled.
+        // `.as_mut()` converts `&mut Option<T>` -> `Option<&mut T>`,
+        // letting us mutate the inner value without taking ownership.
         if let Some(audit) = self.audit.as_mut() {
             let event = AdminEvent {
                 id: audit.next_id,

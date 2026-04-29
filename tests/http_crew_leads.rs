@@ -1,3 +1,5 @@
+// HTTP integration tests for /crew-leads endpoints (list, add,
+// remove, replace). See `tests/http_health.rs` for harness details.
 #![cfg(feature = "http")]
 
 mod http_common;
@@ -66,6 +68,11 @@ async fn replace_crew_lead_returns_204_and_updates_list() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, body) = send(&app, req(Method::GET, "/crew-leads", None)).await;
+    // `iter().map(...).collect::<Vec<&str>>()` extracts each id as a
+    // borrowed string slice from the JSON array. The turbofish-free
+    // form works here because the binding `let ids: Vec<&str>` gives
+    // collect() its target type. `as_str().unwrap()` is acceptable in
+    // tests — in production we'd return a `Result` instead.
     let ids: Vec<&str> = body
         .as_array()
         .unwrap()

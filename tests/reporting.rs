@@ -1,5 +1,11 @@
 //! Integration tests for `specs/07-reporting.md` (RP-S1..S10).
 
+// Watch the `attempt()` helper: it ignores the Result via `let _ = ...`.
+// The reporting service cares about EVENTS (success and failure both
+// emit one), not the boolean outcome — so swallowing the Result is
+// correct here. In production code, `let _ = result;` would be
+// forbidden by AGENTS.md §5 — tests get more leeway.
+
 use passenger_resource_management::application::access_service::AccessService;
 use passenger_resource_management::application::passenger_service::PassengerService;
 use passenger_resource_management::application::reporting_service::{ReportingService, TierCounts};

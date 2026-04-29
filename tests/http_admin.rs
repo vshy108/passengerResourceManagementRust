@@ -1,3 +1,5 @@
+// HTTP integration tests for the /reset admin endpoint.
+// See `tests/http_health.rs` for an explanation of the test harness.
 #![cfg(feature = "http")]
 
 mod http_common;

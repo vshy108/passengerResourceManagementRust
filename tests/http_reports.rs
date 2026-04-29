@@ -1,3 +1,6 @@
+// HTTP integration tests for /audit and /reports endpoints.
+// Drives access requests then asserts on aggregated reporting output.
+// See `tests/http_health.rs` for harness details.
 #![cfg(feature = "http")]
 
 mod http_common;

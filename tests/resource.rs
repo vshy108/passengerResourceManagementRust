@@ -1,5 +1,10 @@
 //! Integration tests for `specs/04-resource.md` (RS-S1..S11).
 
+// Mirrors `tests/passenger.rs` line-for-line — same shape, different
+// aggregate. The duplication is INTENTIONAL: it keeps each test file
+// self-contained and individually grokkable, more important than DRY
+// in test code.
+
 use passenger_resource_management::application::resource_service::ResourceService;
 use passenger_resource_management::domain::actor::Actor;
 use passenger_resource_management::domain::crew_lead::CrewLeadId;

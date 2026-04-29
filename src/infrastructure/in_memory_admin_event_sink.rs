@@ -1,5 +1,11 @@
 //! In-memory append-only sink for `AdminEvent`s.
 
+// `Arc<T>` = Atomically Reference-Counted shared pointer. Multiple
+// owners, deallocated when the last clone is dropped. `Send + Sync`
+// when `T` is — required for sharing across threads.
+// `Mutex<T>` = mutual exclusion lock for interior mutability across
+// threads. Combined `Arc<Mutex<T>>` is the textbook "shared mutable
+// state across threads" pattern in Rust.
 use std::sync::{Arc, Mutex};
 
 use crate::application::ports::AdminEventSink;
@@ -9,6 +15,8 @@ use crate::domain::admin_event::AdminEvent;
 /// the same underlying buffer, so tests can keep one handle and pass
 /// another into a service. Backed by `Arc<Mutex<…>>` so it is also
 /// `Send + Sync` and usable from the HTTP server adapter.
+// `Clone` here clones the Arc (cheap pointer bump), NOT the Vec inside.
+// All clones see the same buffer.
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryAdminEventSink {
     inner: Arc<Mutex<Vec<AdminEvent>>>,
@@ -30,8 +38,15 @@ impl InMemoryAdminEventSink {
     #[must_use]
     pub fn snapshot(&self) -> Vec<AdminEvent> {
         self.inner
+            // `lock()` returns `Result<MutexGuard<...>, PoisonError<...>>`.
+            // Ok holds the guard, which auto-unlocks on drop.
             .lock()
+            // `.expect("...")` panics with this message if Err. Used here
+            // because a poisoned mutex is genuinely unrecoverable — see
+            // doc comment above.
             .expect("admin sink mutex poisoned")
+            // `.clone()` on the Vec inside the guard. Returns an owned
+            // copy so the caller doesn't hold the lock.
             .clone()
     }
 
@@ -44,6 +59,7 @@ impl InMemoryAdminEventSink {
 
     /// # Panics
     /// See [`snapshot`].
+    // Clippy enforces: any type with `len()` should also have `is_empty()`.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner
@@ -72,6 +88,8 @@ mod tests {
     fn sample_event() -> AdminEvent {
         AdminEvent {
             id: 1,
+            // `"cl-1".into()` calls `String::from(&str)` (via `Into`).
+            // Type is inferred from the `CrewLeadId(String)` context.
             actor_id: CrewLeadId("cl-1".into()),
             action: AdminAction::CrewLeadBootstrapped,
             target_kind: TargetKind::CrewLead,

@@ -30,10 +30,16 @@ pub enum TargetKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminEvent {
     pub id: u64,
+    // Who performed the action. Only crew leads can mutate state, so the
+    // actor type is fixed (no Actor enum needed here).
     pub actor_id: CrewLeadId,
     pub action: AdminAction,
+    // `target_kind` + `target_id` together identify the affected entity.
+    // We use a plain `String` for the id because it could refer to any
+    // of CrewLeadId/PassengerId/ResourceId (all wrap String).
     pub target_kind: TargetKind,
     pub target_id: String,
     pub timestamp: Timestamp,
+    // Optional free-form context (e.g. "tier changed Silver → Gold").
     pub details: Option<String>,
 }

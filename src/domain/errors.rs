@@ -8,6 +8,10 @@ use thiserror::Error;
 ///
 /// Marked `#[non_exhaustive]` so adding a new variant in a future slice
 /// does not break downstream `match` arms outside this crate.
+// `#[non_exhaustive]` on a public enum forces external `match` blocks to
+// include a wildcard `_ => ...` arm. Adding a new variant later is then
+// a NON-breaking change for consumers. Internal `match`es in this crate
+// are still required to be exhaustive.
 #[derive(Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DomainError {

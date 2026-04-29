@@ -18,6 +18,10 @@ use crate::infrastructure::in_memory_usage_event_sink::InMemoryUsageEventSink;
 
 /// In-process state owned by exactly one HTTP server. Held inside a
 /// `Mutex` by the caller; not internally synchronised.
+// Composition Root pattern (Dependency Injection): a single struct
+// bundling the wired services. Built once at startup, shared via
+// `Arc<Mutex<World>>` to handlers. Services know nothing about each
+// other's wiring — only this file does.
 pub struct World {
     pub crew_leads: CrewLeadService,
     pub passengers: PassengerService<FakeClock>,
@@ -35,12 +39,17 @@ pub struct World {
 /// Propagates any `DomainError` from the underlying services. With the
 /// hard-coded seed data this should not happen in practice.
 pub fn build_demo_world() -> Result<World, DomainError> {
+    // Single audit sink. We `.clone()` the Arc-backed handle into each
+    // service so they all write to the SAME underlying buffer. Cloning
+    // the sink is cheap (one pointer bump) — see InMemoryAdminEventSink.
     let audit_sink = InMemoryAdminEventSink::new();
 
     let crew_leads = CrewLeadService::bootstrap_audited(
+        // `vec![...]` macro builds a Vec from comma-separated literals.
         vec![
             CrewLead {
                 id: CrewLeadId::from("cl-aria"),
+                // `"Aria Vega".into()` -> String via `From<&str> for String`.
                 name: "Aria Vega".into(),
             },
             CrewLead {
@@ -52,16 +61,22 @@ pub fn build_demo_world() -> Result<World, DomainError> {
                 name: "Jun Park".into(),
             },
         ],
+        // `Box::new(...)` heap-allocates so we can store as `Box<dyn Trait>`.
         Box::new(FakeClock::default()),
         Box::new(audit_sink.clone()),
     )?;
 
+    // Builder chain: `new(...).with_audit(...)` — see PassengerService
+    // for the with_audit details.
     let mut passengers =
         PassengerService::new(FakeClock::default()).with_audit(Box::new(audit_sink.clone()));
     let mut resources =
         ResourceService::new(FakeClock::default()).with_audit(Box::new(audit_sink.clone()));
+    // AccessService doesn't emit ADMIN events (it emits USAGE events),
+    // so its sink is the in-memory usage event sink — no audit handle.
     let access = AccessService::new(FakeClock::default(), InMemoryUsageEventSink::new());
 
+    // Synthetic admin used for seeding. Not exposed externally.
     let admin: Actor = Actor::CrewLead(CrewLeadId::from("cl-aria"));
 
     passengers.create(

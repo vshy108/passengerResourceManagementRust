@@ -1,6 +1,11 @@
 //! Serde DTOs for the HTTP adapter. These are the wire shapes —
 //! domain types stay free of `serde` dependencies.
 
+// `serde` (SERialize / DEserialize) is THE Rust serialisation framework.
+// Crate-level derives turn structs into JSON / YAML / etc. with one line.
+//   - `Serialize`   -> can be encoded to JSON (responses).
+//   - `Deserialize` -> can be decoded from JSON (requests).
+// `utoipa::ToSchema` generates an OpenAPI schema for the type.
 use serde::{Deserialize, Serialize};
 
 use crate::domain::admin_event::{AdminAction, AdminEvent, TargetKind};
@@ -9,6 +14,12 @@ use crate::domain::passenger::Passenger;
 use crate::domain::resource::Resource;
 use crate::domain::tier::Tier;
 use crate::domain::usage_event::{Outcome, UsageEvent};
+
+// Why TWO sets of types (domain `Tier` vs wire `TierDto`)?
+// - Keeps domain free of serde / utoipa dependencies (clean architecture).
+// - Lets the wire format evolve independently from internal types.
+// - Boundary is the place to enforce strictness like `deny_unknown_fields`.
+// Conversions go through `From` impls below — symmetric and explicit.
 
 // ---------- tier --------------------------------------------------------
 
@@ -19,6 +30,9 @@ pub enum TierDto {
     Platinum,
 }
 
+// `From<A> for B` reads as "given an A, produce a B".
+// Implementing it also gives `a.into()` for free in either direction
+// where types are unambiguous.
 impl From<Tier> for TierDto {
     fn from(t: Tier) -> Self {
         match t {
@@ -42,21 +56,29 @@ impl From<TierDto> for Tier {
 // ---------- crew lead ---------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+// `#[serde(deny_unknown_fields)]` rejects request bodies with extra
+// keys instead of silently ignoring them. Strong boundary validation
+// per AGENTS.md §7 — catches typos and malicious payloads early.
 #[serde(deny_unknown_fields)]
 pub struct CrewLeadDto {
     pub id: String,
     pub name: String,
 }
 
+// `From<&CrewLead>` (borrow): converts WITHOUT consuming the source.
+// Useful when serialising a response from a service-owned value.
 impl From<&CrewLead> for CrewLeadDto {
     fn from(c: &CrewLead) -> Self {
         Self {
+            // `.0` reaches inside the newtype to its inner String.
             id: c.id.0.clone(),
             name: c.name.clone(),
         }
     }
 }
 
+// `From<CrewLeadDto>` (by value): consumes the DTO so we can MOVE its
+// String fields into the domain type — zero clones.
 impl From<CrewLeadDto> for CrewLead {
     fn from(d: CrewLeadDto) -> Self {
         CrewLead {
@@ -88,7 +110,12 @@ impl From<&Passenger> for PassengerDto {
         Self {
             id: p.id.0.clone(),
             name: p.name.clone(),
+            // `.into()` calls `From<Tier> for TierDto` defined above —
+            // type inferred from the field's declared type.
             tier: p.tier.into(),
+            // `Option::map` transforms `Some(x)` -> `Some(f(x))`,
+            // leaves `None` unchanged. Here we extract the inner i64
+            // from `Timestamp` for the wire form.
             deleted_at: p.deleted_at.map(|t| t.0),
         }
     }
@@ -226,6 +253,10 @@ impl From<&AdminEvent> for AdminEventDto {
 }
 
 fn admin_action_str(a: AdminAction) -> &'static str {
+    // `&'static str` = a string slice that lives for the entire program
+    // lifetime. String *literals* like "Hello" are `&'static str` —
+    // they're baked into the binary, no allocation. Cheaper than
+    // returning `String` here since we never need to mutate them.
     match a {
         AdminAction::CrewLeadBootstrapped => "CrewLeadBootstrapped",
         AdminAction::CrewLeadAdded => "CrewLeadAdded",

@@ -6,17 +6,30 @@
 // expansion is out of our control, so we silence the lint at module
 // scope rather than per-item (the attribute does not propagate into
 // derive-generated tokens).
+// `#![allow(...)]` (with the `!`) is INNER attribute — applies to the
+// whole module/file. `#[allow(...)]` (no `!`) applies to one item.
 #![allow(clippy::needless_for_each)]
 
+// Standard-library threading primitives. See in_memory_admin_event_sink
+// for the Arc<Mutex<...>> pattern explanation.
 use std::sync::{Arc, Mutex};
 
+// `axum` is the HTTP framework. The `use { a, b, c }` syntax imports
+// multiple items from one path in a single statement.
 use axum::{
     Json, Router,
+    // Axum *extractors* — types that pull data out of a request:
+    //   Path<T>   -> URL path parameters
+    //   Query<T>  -> query-string parameters (?foo=bar)
+    //   State<T>  -> shared application state (AppState here)
+    //   Json<T>   -> deserialised JSON body (also used for responses)
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
+    // HTTP method routers — `get(handler)` registers a GET handler.
     routing::{get, patch, post, put},
 };
+// `tower-http` is a collection of reusable HTTP middlewares.
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use utoipa::OpenApi;
@@ -36,12 +49,16 @@ use crate::interface::dto::{
 };
 
 /// Shared state held by every handler.
+// `type` declares an alias — `AppState` is just a shorter name for the
+// `Arc<Mutex<World>>` triple. Doesn't introduce a new type.
 pub type AppState = Arc<Mutex<World>>;
 
 /// CORS origin policy. `Any` accepts any origin (dev/demo default);
 /// `List` accepts only the listed origins (production-style).
 #[derive(Debug, Clone, Default)]
 pub enum CorsOrigins {
+    // `#[default]` marks which variant `Default::default()` returns.
+    // Required when deriving `Default` on an enum.
     #[default]
     Any,
     List(Vec<HeaderValue>),
@@ -69,10 +86,15 @@ pub fn router_with(state: AppState, cors_origins: CorsOrigins) -> Router {
 
     let x_request_id = HeaderName::from_static("x-request-id");
 
+    // Builder-style chain. Each `.route(...)` returns a new Router with
+    // one more endpoint registered. `Router::new()` starts empty.
     Router::new()
         .route("/health", get(health))
         .route("/openapi.json", get(openapi_json))
         // crew leads
+        // `.post(handler)` chained after `.get(...)` registers a second
+        // method on the same path. `{old_id}` is a path parameter
+        // captured by `Path<String>` extractors in the handler.
         .route("/crew-leads", get(list_crew_leads).post(add_crew_lead))
         .route(
             "/crew-leads/{old_id}",
@@ -107,9 +129,14 @@ pub fn router_with(state: AppState, cors_origins: CorsOrigins) -> Router {
         )
         // admin
         .route("/reset", post(reset_world))
+        // Inject shared state into every handler that uses `State<AppState>`.
         .with_state(state)
         // 64 KiB body cap — every request DTO in this app is tiny.
+        // Defends against accidental/malicious oversized payloads.
         .layer(DefaultBodyLimit::max(64 * 1024))
+        // `.layer(...)` wraps the entire router in a middleware. Layers
+        // run in REVERSE registration order on the request side and in
+        // declaration order on the response side (tower convention).
         .layer(cors)
         // Request-id: assign a UUID if the client did not send one,
         // then propagate it back on the response so logs can correlate.
@@ -123,6 +150,7 @@ pub fn router_with(state: AppState, cors_origins: CorsOrigins) -> Router {
 /// authorisation 403; not-found 404; conflicts 409. New variants get a
 /// default 500 to surface unhandled cases.
 fn map_err(e: &DomainError) -> (StatusCode, &'static str) {
+    // `use DomainError as D;` is a local alias for brevity in the match.
     use DomainError as D;
     match e {
         D::UnauthorizedActor => (StatusCode::FORBIDDEN, "UnauthorizedActor"),
@@ -140,8 +168,11 @@ fn map_err(e: &DomainError) -> (StatusCode, &'static str) {
 }
 
 fn err_response_owned(e: &DomainError) -> Response {
+    // `e.to_string()` calls `Display` (provided by `thiserror::Error`).
     let msg = e.to_string();
     let (status, code) = map_err(e);
+    // A tuple `(StatusCode, Json<...>)` implements `IntoResponse`, so
+    // chaining `.into_response()` produces a uniform `Response` type.
     (
         status,
         Json(ErrorBody {
@@ -153,6 +184,10 @@ fn err_response_owned(e: &DomainError) -> Response {
 }
 
 fn lock_world(state: &AppState) -> std::sync::MutexGuard<'_, World> {
+    // `MutexGuard<'_, World>` is the RAII lock guard: dereferences to
+    // `World`, releases the lock automatically when dropped.
+    // The `'_` is an anonymous lifetime tied to `state`.
+    //
     // SAFETY (re: AGENTS.md §8): a poisoned lock means a previous
     // handler panicked mid-mutation, leaving the World in an
     // unknown state. Continuing would corrupt the audit trail, so
@@ -162,8 +197,15 @@ fn lock_world(state: &AppState) -> std::sync::MutexGuard<'_, World> {
 
 // ---------- handlers ---------------------------------------------------
 
+// `#[utoipa::path(...)]` annotates the handler so utoipa can include
+// it in the auto-generated OpenAPI schema served at /openapi.json.
+
 #[utoipa::path(get, path = "/health", tag = "system",
     responses((status = 200, description = "Server is up", body = String)))]
+// `async fn` declares a function returning a `Future`. Axum handlers
+// MUST be async — runtime (tokio) drives them. `&'static str` is fine
+// to return: axum's `IntoResponse` for it sends the bytes verbatim
+// with `text/plain` and 200 OK.
 async fn health() -> &'static str {
     "ok"
 }
@@ -171,7 +213,12 @@ async fn health() -> &'static str {
 #[utoipa::path(get, path = "/crew-leads", tag = "crew-leads",
     responses((status = 200, description = "All crew leads", body = Vec<CrewLeadDto>)))]
 async fn list_crew_leads(State(state): State<AppState>) -> Json<Vec<CrewLeadDto>> {
+    // `State(state): State<AppState>` destructures the extractor in
+    // the parameter pattern: `state` is now `AppState` (= Arc<Mutex<World>>).
     let w = lock_world(&state);
+    // `Json(value)` wraps any `Serialize` value as a JSON response.
+    // `iter().map(...).collect()` is the standard Rust pipeline for
+    // transforming a slice into a Vec of converted items.
     Json(w.crew_leads.list().iter().map(CrewLeadDto::from).collect())
 }
 
@@ -184,15 +231,24 @@ async fn list_crew_leads(State(state): State<AppState>) -> Json<Vec<CrewLeadDto>
         (status = 403, body = ErrorBody)))]
 async fn replace_crew_lead(
     State(state): State<AppState>,
+    // Each function argument is a separate axum extractor. Order DOES
+    // matter: the body extractor (`Json<...>`) MUST come last because
+    // it consumes the request body. Using two body extractors is a
+    // compile error caught by axum's trait bounds.
     Path(old_id): Path<String>,
     Json(req): Json<ReplaceCrewLeadReq>,
 ) -> Response {
+    // `&mut w` because `replace_audited` mutates the service state.
     let mut w = lock_world(&state);
     match w.crew_leads.replace_audited(
         &CrewLeadId(req.actor_id),
         &CrewLeadId(old_id),
+        // `req.new_lead.into()` calls `From<CrewLeadDto> for CrewLead`.
         req.new_lead.into(),
     ) {
+        // `Ok(())` matches the unit-Ok variant. `()` is the empty tuple
+        // (Rust's "void"). NO_CONTENT (204) is the conventional response
+        // for successful mutations with no body to return.
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => err_response_owned(&e),
     }
@@ -337,6 +393,14 @@ async fn soft_delete_resource(
 async fn use_resource(State(state): State<AppState>, Json(req): Json<UseResourceReq>) -> Response {
     let mut w = lock_world(&state);
     let actor = Actor::Passenger(PassengerId(req.passenger_id));
+    // BORROW SPLITTING: `access.use_resource` needs `&mut self` on
+    // `access` AND immutable borrows on `passengers` + `resources`,
+    // all from the same `World`. The borrow checker won't let us call
+    // `w.passengers.list()` while we hold `&mut w.access`, so we
+    // destructure `*w` once into separate field bindings — the
+    // compiler now sees three INDEPENDENT borrows it can track.
+    // `..` ignores the remaining fields we don't need (`audit_sink`,
+    // `crew_leads`).
     let World {
         passengers,
         resources,
@@ -521,6 +585,9 @@ async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq
     // Demo-only affordance, but still gated: caller must identify as
     // an existing crew lead so an anonymous client can't wipe state.
     {
+        // Inner block scopes the lock guard so it's RELEASED before
+        // the `*lock_world(...) = fresh` reassignment below — otherwise
+        // we'd hold two guards at once and deadlock.
         let w = lock_world(&state);
         let actor_id = CrewLeadId(req.actor_id.clone());
         if !w.crew_leads.list().iter().any(|c| c.id == actor_id) {
@@ -531,16 +598,26 @@ async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq
         Ok(w) => w,
         Err(e) => return err_response_owned(&e),
     };
+    // `*guard = value` writes through the deref to replace the World.
+    // The guard is dropped at the end of this expression, releasing
+    // the lock before we return.
     *lock_world(&state) = fresh;
     StatusCode::NO_CONTENT.into_response()
 }
 
 // ---------- OpenAPI ----------------------------------------------------
 
+// `utoipa::OpenApi` is a derive macro that builds a static OpenAPI spec
+// at compile time from the `#[utoipa::path(...)]` annotations on each
+// handler. The empty struct `ApiDoc` is just a carrier for the impl.
 #[derive(OpenApi)]
 #[openapi(
     info(
         title = "PRMS HTTP API",
+        // `env!("CARGO_PKG_VERSION")` is a compile-time macro that
+        // expands to the value of the env var (set by Cargo to the
+        // package version from Cargo.toml). Errors out at compile time
+        // if the var is missing.
         version = env!("CARGO_PKG_VERSION"),
         description = "Spaceship X26 Passenger Resource Management System."
     ),
@@ -579,5 +656,6 @@ async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq
 struct ApiDoc;
 
 async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
+    // `ApiDoc::openapi()` is generated by the derive macro above.
     Json(ApiDoc::openapi())
 }

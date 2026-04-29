@@ -9,6 +9,10 @@ use crate::domain::errors::DomainError;
 use crate::domain::resource::{Resource, ResourceId};
 use crate::domain::tier::Tier;
 
+// Mirror of `PassengerService` for resources — same shape on purpose so
+// the patterns are easy to learn once. See passenger_service.rs for
+// detailed comments on these patterns; this file only highlights the
+// differences specific to resources.
 pub struct ResourceService<C: Clock> {
     active: Vec<Resource>,
     deleted: Vec<Resource>,
@@ -124,8 +128,14 @@ impl<C: Clock> ResourceService<C> {
     pub fn list_accessible_for(&self, tier: Tier) -> Vec<Resource> {
         self.active
             .iter()
+            // `filter` keeps elements where the predicate returns true.
             .filter(|r| tier.can_access(r.min_tier))
+            // `.cloned()` turns `Iterator<Item = &Resource>` into
+            // `Iterator<Item = Resource>` by cloning each element.
+            // Needed because we return owned Vec<Resource>.
             .cloned()
+            // `.collect()` consumes the iterator into a collection. The
+            // target type is inferred from the function's return type.
             .collect()
     }
 

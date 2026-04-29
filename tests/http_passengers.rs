@@ -1,3 +1,8 @@
+// HTTP integration tests for /passengers endpoints (CRUD + tier
+// updates). Of note: `create_passenger_rejects_unknown_field` proves
+// the `#[serde(deny_unknown_fields)]` on the request DTO actually
+// fires — important boundary validation.
+// See `tests/http_health.rs` for harness details.
 #![cfg(feature = "http")]
 
 mod http_common;

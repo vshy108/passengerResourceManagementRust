@@ -1,5 +1,16 @@
 //! Integration tests for `specs/06-audit.md` (AU-S1..S11).
 
+// Two patterns to watch in this file:
+//   1. `let sink = InMemoryAdminEventSink::new();` then `sink.clone()`
+//      handed to the service — both handles point at the SAME inner
+//      buffer (Arc<Mutex<...>>), so `sink.snapshot()` in the test
+//      observes events written by the service.
+//   2. `assert!(opt.as_deref().is_some_and(|s| s.contains("...")))` —
+//      `.as_deref()` turns `Option<String>` into `Option<&str>`, then
+//      `.is_some_and(predicate)` (Rust 1.70+) returns true iff the
+//      Option is Some AND the predicate holds. Replaces the older
+//      `.map(|s| s.contains("...")).unwrap_or(false)` idiom.
+
 use passenger_resource_management::application::crew_lead_service::CrewLeadService;
 use passenger_resource_management::application::passenger_service::PassengerService;
 use passenger_resource_management::application::resource_service::ResourceService;
