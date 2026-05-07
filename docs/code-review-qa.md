@@ -77,6 +77,8 @@ I recommend tagging only high-value questions, not every question. Too many tags
 
 ## 1. Architecture & Layering
 
+Related files: [AGENTS.md](../AGENTS.md), [README.md](../README.md), [src/lib.rs](../src/lib.rs), [src/interface/composition_root.rs](../src/interface/composition_root.rs), [Cargo.toml](../Cargo.toml)
+
 **Q: What is the dependency rule in this codebase and why does it matter?**
 
 A: Dependencies point **inward only**: `interface → application → domain`, with `infrastructure` depending on `application` (it implements port traits). The domain layer has zero I/O, no HTTP, and no system-clock calls. This means all business logic can be compiled and tested without any infrastructure being present. Reversing any arrow — for example, having a domain struct import a serde type — would couple the core model to a serialisation library and make every domain test depend on that library too.
@@ -111,6 +113,8 @@ A: Write a new struct in `src/infrastructure/` (e.g., `PostgresPassengerRepo`) t
 ---
 
 ## 2. Domain Layer
+
+Related files: [src/domain/tier.rs](../src/domain/tier.rs), [src/domain/passenger.rs](../src/domain/passenger.rs), [src/domain/resource.rs](../src/domain/resource.rs), [src/domain/usage_event.rs](../src/domain/usage_event.rs), [src/domain/admin_event.rs](../src/domain/admin_event.rs), [src/domain/errors.rs](../src/domain/errors.rs), [specs/01-tier-policy.md](../specs/01-tier-policy.md), [specs/05-access.md](../specs/05-access.md)
 
 **Q: Why does `Tier` have an explicit `rank()` method instead of deriving `PartialOrd`?**
 
@@ -155,6 +159,8 @@ A: `AdminAction` is an internal domain type only ever consumed by this crate's o
 ---
 
 ## 3. Application Layer — Services
+
+Related files: [src/application/crew_lead_service.rs](../src/application/crew_lead_service.rs), [src/application/passenger_service.rs](../src/application/passenger_service.rs), [src/application/resource_service.rs](../src/application/resource_service.rs), [src/application/access_service.rs](../src/application/access_service.rs), [src/application/reporting_service.rs](../src/application/reporting_service.rs), [tests/lifecycle.rs](../tests/lifecycle.rs)
 
 **Q: Why is `CrewLeadService::add` implemented as "always returns `CrewLeadLimitReached`"?**
 
@@ -215,6 +221,8 @@ A: Yes, per RP-R3: "top resources by successful (allowed) access count." Includi
 
 ## 4. Application Layer — Ports & Guards
 
+Related files: [src/application/ports.rs](../src/application/ports.rs), [src/application/guards.rs](../src/application/guards.rs), [src/domain/actor.rs](../src/domain/actor.rs)
+
 **Q: Why do all port traits require `Send + Sync`?**
 
 A: In the HTTP server, the `World` struct (which holds all services) is wrapped in `Arc<Mutex<World>>` and shared across multiple Axum handler threads. For `Arc<T>` to be `Send + Sync`, every `T` inside it must also be `Send + Sync`. Adding `Send + Sync` as supertraits on `Clock`, `UsageEventSink`, etc. pushes that requirement onto implementors, giving a compile-time guarantee that no non-thread-safe type (e.g., `Rc<T>`) can accidentally be injected. The cost is `FakeClock` must be thread-safe, which is why it uses `AtomicI64` rather than `Cell<i64>`.
@@ -240,6 +248,8 @@ A: Returning a reference avoids a heap allocation (cloning the inner `String`) w
 ---
 
 ## 5. Infrastructure Layer
+
+Related files: [src/infrastructure/fake_clock.rs](../src/infrastructure/fake_clock.rs), [src/infrastructure/in_memory_usage_event_sink.rs](../src/infrastructure/in_memory_usage_event_sink.rs), [src/infrastructure/in_memory_admin_event_sink.rs](../src/infrastructure/in_memory_admin_event_sink.rs)
 
 **Q: `FakeClock` uses `AtomicI64` with `Ordering::Relaxed`. Why `Relaxed` and not `SeqCst`?**
 
@@ -267,6 +277,8 @@ A: Add `src/infrastructure/json_file_repo.rs` with a struct (e.g., `JsonFilePass
 
 ## 6. Interface Layer — DTOs
 
+Related files: [src/interface/dto.rs](../src/interface/dto.rs), [src/domain/tier.rs](../src/domain/tier.rs), [src/domain/passenger.rs](../src/domain/passenger.rs), [src/domain/resource.rs](../src/domain/resource.rs)
+
 **Q: Why have a `TierDto` enum that mirrors `Tier` exactly? Isn't it just duplication?**
 
 A: The mirror is intentional. It keeps the domain type free of `serde`, `utoipa`, and HTTP-related dependencies. If the wire format ever diverges (e.g., the API renames `"Platinum"` to `"Elite"` for marketing reasons), the DTO changes without touching the domain model. The `From<Tier> for TierDto` and `From<TierDto> for Tier` impls are the conversion bridge — exhaustive `match` blocks mean adding a new tier variant causes a compile error in both directions until both sides are updated.
@@ -292,6 +304,8 @@ A: Composition would couple the OpenAPI schema shape of `UseResourceReq` to `Act
 ---
 
 ## 7. Interface Layer — HTTP Handlers
+
+Related files: [src/interface/http.rs](../src/interface/http.rs), [src/interface/dto.rs](../src/interface/dto.rs), [src/interface/composition_root.rs](../src/interface/composition_root.rs), [src/bin/serve.rs](../src/bin/serve.rs), [tests/http_access.rs](../tests/http_access.rs), [tests/http_common](../tests/http_common)
 
 **Q: How does the `use_resource` handler avoid borrow-checker errors when it needs both `passengers` and `resources` (immutable) and `access` (mutable) from the same `World`?**
 
@@ -335,6 +349,8 @@ A: No. The domain and application layers are entirely synchronous. Axum requires
 
 ## 8. Error Handling
 
+Related files: [src/domain/errors.rs](../src/domain/errors.rs), [src/interface/http.rs](../src/interface/http.rs), [src/interface/dto.rs](../src/interface/dto.rs), [tests/access.rs](../tests/access.rs), [tests/http_access.rs](../tests/http_access.rs)
+
 **Q: Why is `DomainError` marked `#[non_exhaustive]`?**
 
 A: Future spec iterations will add new error variants (e.g., `QuotaExceeded`, `ScheduleConflict`). Without `#[non_exhaustive]`, every external `match` on `DomainError` would be a breaking change. With it, external callers are forced to add a `_ => ...` wildcard arm, making forward-compatibility explicit and compiler-enforced. Internal code in this crate still gets exhaustiveness checking — `#[non_exhaustive]` only relaxes the constraint for code outside the crate.
@@ -372,6 +388,8 @@ A: Yes, per AC-R2 and AC-R3. A `UsageEvent` requires both a valid `tier_at_attem
 
 ## 9. Concurrency & Thread Safety
 
+Related files: [src/interface/http.rs](../src/interface/http.rs), [src/interface/composition_root.rs](../src/interface/composition_root.rs), [src/infrastructure/fake_clock.rs](../src/infrastructure/fake_clock.rs), [src/infrastructure/in_memory_admin_event_sink.rs](../src/infrastructure/in_memory_admin_event_sink.rs)
+
 **Q: The entire `World` is behind a single `Mutex`. What are the concurrency implications?**
 
 A: All mutations are serialised: at any instant only one handler is running business logic. This is correct for an in-memory, demo-scope system — it avoids data races with the simplest possible implementation. The trade-off is throughput under concurrent load: every request waits for the lock, making the server effectively single-threaded. Addressing this would require per-aggregate locks (one `Mutex` per service) or an actor-model message-passing architecture, both of which are out of scope per AGENTS.md §8.
@@ -397,6 +415,8 @@ A: `InMemoryAdminEventSink` needs to be cloned cheaply so both the service and t
 ---
 
 ## 10. Rust Language Specifics
+
+Related files: [src/application/access_service.rs](../src/application/access_service.rs), [src/application/passenger_service.rs](../src/application/passenger_service.rs), [src/application/crew_lead_service.rs](../src/application/crew_lead_service.rs), [src/application/reporting_service.rs](../src/application/reporting_service.rs)
 
 **Q: What does `let Actor::Passenger(passenger_id) = actor else { return Err(...); }` mean?**
 
@@ -459,6 +479,8 @@ A: `entry(k).or_default()` returns a `&mut TierCounts` — either the existing e
 
 ## 11. Testing Strategy
 
+Related files: [tests/access.rs](../tests/access.rs), [tests/lifecycle.rs](../tests/lifecycle.rs), [tests/reporting.rs](../tests/reporting.rs), [tests/http_access.rs](../tests/http_access.rs), [src/infrastructure/fake_clock.rs](../src/infrastructure/fake_clock.rs), [specs/](../specs)
+
 **Q: Why are tests named with spec IDs like `fn tp_r1_s10_rank_silver_is_one`?**
 
 A: Full traceability. When a test fails in CI, the name immediately points to the spec document, rule, and scenario (e.g., `TP-R1`, scenario 10). A reviewer seeing the failure never needs to open the code to know which business rule broke. It also enforces discipline when writing tests: naming the test forces the author to identify the exact spec item being covered before writing any assertions.
@@ -507,6 +529,8 @@ A: It is a test fixture that avoids repeating the same construction in every tes
 
 ## 12. Security & Input Validation
 
+Related files: [src/interface/dto.rs](../src/interface/dto.rs), [src/interface/http.rs](../src/interface/http.rs), [src/application/guards.rs](../src/application/guards.rs), [deny.toml](../deny.toml), [AGENTS.md](../AGENTS.md)
+
 **Q: Where is input validation enforced and why there specifically?**
 
 A: At the **interface boundary** only:
@@ -551,6 +575,8 @@ A: `ErrorBody` exposes `code` (a machine-readable string like `"AccessDenied"`) 
 ---
 
 ## 13. Design Patterns
+
+Related files: [src/application/ports.rs](../src/application/ports.rs), [src/application/access_service.rs](../src/application/access_service.rs), [src/application/passenger_service.rs](../src/application/passenger_service.rs), [src/interface/composition_root.rs](../src/interface/composition_root.rs), [AGENTS.md](../AGENTS.md)
 
 **Q: What is the Repository pattern and where is it applied?**
 
@@ -597,6 +623,8 @@ A: Use a plain enum when the set of variants is **closed** (known at compile tim
 ---
 
 ## 14. Full-Stack — REST API Design
+
+Related files: [src/interface/http.rs](../src/interface/http.rs), [src/interface/dto.rs](../src/interface/dto.rs), [src/bin/serve.rs](../src/bin/serve.rs), [tests/http_access.rs](../tests/http_access.rs), [README.md](../README.md)
 
 **Q: Is the REST API design consistent with HTTP conventions? Walk through a few endpoints.**
 
@@ -656,6 +684,8 @@ A: Yes, it aligns with the Rust serde defaults (which mirror snake_case struct f
 
 ## 15. Full-Stack — TypeScript / React Frontend
 
+Related files: [web/src/App.tsx](../web/src/App.tsx), [web/src/domain/tier.ts](../web/src/domain/tier.ts), [web/src/domain/ids.ts](../web/src/domain/ids.ts), [web/src/services/accessService.ts](../web/src/services/accessService.ts), [web/src/services/world.ts](../web/src/services/world.ts), [web/vite.config.ts](../web/vite.config.ts)
+
 **Q: The frontend has its own `web/src/domain/tier.ts` that mirrors `src/domain/tier.rs`. How is spec parity maintained?**
 
 A: Both files implement the same `rank()` function and `canAccess()` comparison, with the same variant names (`Silver`, `Gold`, `Platinum`). The spec (`specs/01-tier-policy.md`) is the single source of truth — both implementations are derived from it. Parity is maintained by test coverage: the Rust tests cover the Rust implementation and Vitest covers the TypeScript one. If the spec changes, both must be updated. A more robust approach would be code generation: generate TypeScript types from the Rust enums at build time (e.g., via `ts-rs` crate), eliminating the manual mirror entirely.
@@ -711,6 +741,8 @@ A: Components are excluded from coverage measurement — they are React UI eleme
 
 ## 16. Full-Stack — Frontend ↔ Backend Contract
 
+Related files: [web/src/services/api.ts](../web/src/services/api.ts), [web/src/domain/errors.ts](../web/src/domain/errors.ts), [src/interface/dto.rs](../src/interface/dto.rs), [src/interface/http.rs](../src/interface/http.rs), [web/vite.config.ts](../web/vite.config.ts)
+
 **Q: The TypeScript `api.ts` file defines `ApiPassenger`, `ApiResource`, etc. as manual type declarations. What is the risk and how would you eliminate it?**
 
 A: The risk is **contract drift** — if the Rust server changes a field name (e.g., `min_tier` → `minimum_tier`) or adds a required field, the TypeScript types go stale silently. The API call succeeds at runtime (JSON parses fine) but the frontend reads `undefined` instead of the field value. Eliminating the risk:
@@ -744,6 +776,8 @@ A: Yes, and it is worth raising. The Rust `AccessService` checks `Actor::Passeng
 
 ## 17. Full-Stack — State Management
 
+Related files: [web/src/state/store.tsx](../web/src/state/store.tsx), [web/src/state/storeContext.ts](../web/src/state/storeContext.ts), [web/src/state/useStore.ts](../web/src/state/useStore.ts), [web/src/services/world.ts](../web/src/services/world.ts)
+
 **Q: The frontend uses React Context + manual version bumping instead of a dedicated state library (Redux, Zustand, Jotai). When would you reach for a library instead?**
 
 A: The current approach works for a demo-scale app with a small, predictable mutation surface (`mutate()` wraps every write). You would reach for a library when:
@@ -772,6 +806,8 @@ A: Yes. Every mutation (any panel's button click) increments `version`, which ca
 ---
 
 ## 18. Full-Stack — Observability & Operability
+
+Related files: [src/bin/serve.rs](../src/bin/serve.rs), [src/interface/http.rs](../src/interface/http.rs), [Cargo.toml](../Cargo.toml)
 
 **Q: The HTTP server assigns a `x-request-id` UUID to every request. How would you use this in practice?**
 
@@ -802,6 +838,8 @@ In a containerised deployment (Docker/Kubernetes) the env var is injected via a 
 ---
 
 ## 19. Full-Stack — Performance & Scalability
+
+Related files: [src/application/passenger_service.rs](../src/application/passenger_service.rs), [src/application/resource_service.rs](../src/application/resource_service.rs), [src/application/reporting_service.rs](../src/application/reporting_service.rs), [src/interface/http.rs](../src/interface/http.rs), [web/src/services/reportingService.ts](../web/src/services/reportingService.ts)
 
 **Q: All service data is in a single `Vec` per entity type. What is the time complexity of `list()`, `get()`, and `soft_delete()`?**
 
@@ -839,6 +877,8 @@ The right choice depends on how stale the report can be (SLO) and whether the se
 ---
 
 ## 20. Full-Stack — Deployment & DevOps
+
+Related files: [Cargo.toml](../Cargo.toml), [rust-toolchain.toml](../rust-toolchain.toml), [deny.toml](../deny.toml), [README.md](../README.md), [web/package.json](../web/package.json)
 
 **Q: The `deny.toml` file bans wildcard version specs and audits known vulnerability advisories. What does this protect against?**
 
@@ -895,6 +935,8 @@ Each step is a separate job so failures are localised. Steps 1-5 map exactly to 
 
 ## 21. Full-Stack — Product & Tradeoff Thinking
 
+Related files: [docs/plan-passengerResourceManagement.prompt.md](plan-passengerResourceManagement.prompt.md), [specs/](../specs), [src/application/crew_lead_service.rs](../src/application/crew_lead_service.rs), [src/application/access_service.rs](../src/application/access_service.rs)
+
 **Q: The spec fixes the crew lead count at exactly 3. What would you change if the product requirement changed to "at least 1, at most 10"?**
 
 A: Three changes:
@@ -935,6 +977,8 @@ A: (This is intentionally open-ended — here is one strong answer.)
 ---
 
 ## 22. Extra Interviewer Angles
+
+Related files: [src/interface/http.rs](../src/interface/http.rs), [web/src/services/api.ts](../web/src/services/api.ts), [web/src/services/accessService.ts](../web/src/services/accessService.ts), [src/domain/usage_event.rs](../src/domain/usage_event.rs), [src/domain/admin_event.rs](../src/domain/admin_event.rs)
 
 **Q: If you were reviewing this repository, what is the first risk you would call out?**
 
@@ -1028,6 +1072,8 @@ A: This project shows I can work across the stack while keeping boundaries clear
 ---
 
 ## 23. Prompt & Submission Rubric Questions
+
+Related files: [docs/plan-passengerResourceManagement.prompt.md](plan-passengerResourceManagement.prompt.md), [README.md](../README.md), [AGENTS.md](../AGENTS.md), [Cargo.toml](../Cargo.toml), [rust-toolchain.toml](../rust-toolchain.toml)
 
 **Q: The prompt asks reviewers to judge the project as if written by an experienced engineer. What evidence in the repo supports that?**
 
@@ -1138,6 +1184,8 @@ A: Be ready to run the core tests, start the HTTP server, call `/health`, make o
 ---
 
 ## 24. Rapid-Fire Reviewer Follow-Ups
+
+Related files: [src/domain/tier.rs](../src/domain/tier.rs), [src/application/access_service.rs](../src/application/access_service.rs), [src/interface/http.rs](../src/interface/http.rs), [web/src/domain/tier.ts](../web/src/domain/tier.ts), [web/src/services/api.ts](../web/src/services/api.ts)
 
 **Q: What is the single most important invariant in the system?**
 
@@ -1353,6 +1401,8 @@ A: It is a spec-driven, layered Rust domain model with deterministic tests, an o
 
 ### Rust Ownership, Borrowing, And Type System
 
+Related files: [src/application/access_service.rs](../src/application/access_service.rs), [src/application/passenger_service.rs](../src/application/passenger_service.rs), [src/application/resource_service.rs](../src/application/resource_service.rs), [src/infrastructure/fake_clock.rs](../src/infrastructure/fake_clock.rs)
+
 **Q: Why do service methods often take owned `String`/ID values on create, but borrowed IDs on lookup/update?**
 
 A: Create methods need to store the values inside service-owned structs, so taking ownership avoids unnecessary clones. Lookup/update methods only need to compare against existing records, so they take borrowed IDs (`&PassengerId`, `&ResourceId`) and avoid moving or cloning caller-owned values.
@@ -1445,6 +1495,8 @@ A: A mutex becomes poisoned when a thread panics while holding it. That means th
 
 ### Domain And Business Rules
 
+Related files: [src/domain/tier.rs](../src/domain/tier.rs), [src/domain/passenger.rs](../src/domain/passenger.rs), [src/domain/resource.rs](../src/domain/resource.rs), [src/domain/usage_event.rs](../src/domain/usage_event.rs), [specs/01-tier-policy.md](../specs/01-tier-policy.md), [specs/05-access.md](../specs/05-access.md)
+
 **Q: Is `Tier::try_from("gold")` expected to succeed?**
 
 A: No. Tier parsing is case-sensitive and accepts only canonical names (`Silver`, `Gold`, `Platinum`). Rejecting lowercase catches invalid client input at the boundary.
@@ -1524,6 +1576,8 @@ A: I would add denied attempts by resource and tier. It would reveal resources u
 ---
 
 ### HTTP, Axum, And API Behaviour
+
+Related files: [src/interface/http.rs](../src/interface/http.rs), [src/interface/dto.rs](../src/interface/dto.rs), [src/bin/serve.rs](../src/bin/serve.rs), [tests/http_access.rs](../tests/http_access.rs)
 
 **Q: Why is the HTTP adapter described as thin?**
 
@@ -1617,6 +1671,8 @@ A: Accept an `Idempotency-Key` header, store request/result pairs in persistence
 
 ### Frontend, UX, And TypeScript
 
+Related files: [web/src/App.tsx](../web/src/App.tsx), [web/src/components](../web/src/components), [web/src/domain/errors.ts](../web/src/domain/errors.ts), [web/src/services/api.ts](../web/src/services/api.ts), [web/src/state/store.tsx](../web/src/state/store.tsx)
+
 **Q: Why use TypeScript union types for domain errors?**
 
 A: They give exhaustive checking in frontend code. If a component switches on `DomainError`, TypeScript can help ensure all known cases are handled.
@@ -1684,6 +1740,8 @@ A: Color-blind users and screen readers may not perceive the distinction. Use te
 ---
 
 ### Testing, Coverage, And Quality Gates
+
+Related files: [tests/access.rs](../tests/access.rs), [tests/lifecycle.rs](../tests/lifecycle.rs), [tests/http_access.rs](../tests/http_access.rs), [web/src/services/__tests__](../web/src/services/__tests__), [web/vite.config.ts](../web/vite.config.ts), [Cargo.toml](../Cargo.toml)
 
 **Q: What is the difference between line coverage and region coverage?**
 
@@ -1753,6 +1811,8 @@ A: Formatting, clippy, and tests. Coverage is useful only after the code compile
 
 ### Security And Threat Modeling
 
+Related files: [src/interface/http.rs](../src/interface/http.rs), [src/interface/dto.rs](../src/interface/dto.rs), [src/application/guards.rs](../src/application/guards.rs), [deny.toml](../deny.toml), [AGENTS.md](../AGENTS.md)
+
 **Q: What is the most realistic abuse case today?**
 
 A: A client impersonates a crew lead by sending a known `actor_id` and then changes passenger/resource state. This is because authentication is simulated.
@@ -1809,6 +1869,8 @@ A: CORS is a browser enforcement mechanism controlling which web pages can make 
 
 ### Persistence, Data Modeling, And Transactions
 
+Related files: [src/application/ports.rs](../src/application/ports.rs), [src/infrastructure/in_memory_usage_event_sink.rs](../src/infrastructure/in_memory_usage_event_sink.rs), [src/infrastructure/in_memory_admin_event_sink.rs](../src/infrastructure/in_memory_admin_event_sink.rs), [docs/plan-passengerResourceManagement.prompt.md](plan-passengerResourceManagement.prompt.md)
+
 **Q: What table should be append-only?**
 
 A: `usage_events` and `admin_events`. They are audit/history logs and should not be updated or deleted except through retention policies with explicit compliance approval.
@@ -1858,6 +1920,8 @@ A: How long usage/admin audit events must be kept. Space mission audit data migh
 ---
 
 ### Refactoring And Extensibility
+
+Related files: [src/application/passenger_service.rs](../src/application/passenger_service.rs), [src/application/resource_service.rs](../src/application/resource_service.rs), [src/application/crew_lead_service.rs](../src/application/crew_lead_service.rs), [src/application/ports.rs](../src/application/ports.rs), [specs/](../specs)
 
 **Q: What is one refactor you would avoid right now?**
 
@@ -1909,6 +1973,8 @@ A: The prompt defines exactly three tiers. A closed enum gives compile-time exha
 
 ### Reviewer Presentation And Communication
 
+Related files: [README.md](../README.md), [AGENTS.md](../AGENTS.md), [specs/05-access.md](../specs/05-access.md), [tests/access.rs](../tests/access.rs), [src/application/access_service.rs](../src/application/access_service.rs)
+
 **Q: What is the best file to open first in a review?**
 
 A: `README.md` for the overview and quickstart, then `specs/05-access.md` plus `tests/access.rs` and `src/application/access_service.rs` to show spec-to-test-to-code traceability.
@@ -1958,6 +2024,8 @@ A: The code is spec-driven and intentionally layered: business rules are pure, t
 ---
 
 ## 26. Adjacent Full-Stack Review Questions
+
+Related files: [README.md](../README.md), [AGENTS.md](../AGENTS.md), [Cargo.toml](../Cargo.toml), [deny.toml](../deny.toml), [web/package.json](../web/package.json), [src/bin/serve.rs](../src/bin/serve.rs)
 
 **Q: If this project became a team-owned service, what documentation would you add first?**
 
