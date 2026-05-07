@@ -7,6 +7,16 @@ import { ReportsPanel } from "./components/ReportsPanel";
 import { ResourcesPanel } from "./components/ResourcesPanel";
 import { TierMatrix } from "./components/TierMatrix";
 
+// Root layout. Two independent worlds run side-by-side:
+//
+// 1. In-browser TypeScript world (CrewLeads/Passengers/Resources/Access
+//    /Reports/Audit panels) — state lives in StoreProvider (see
+//    state/store.tsx), resets on page refresh, zero network calls.
+//
+// 2. Live Rust HTTP world (LiveServerPanel) — talks to the axum server
+//    at localhost:8080. Mutations in one world are NOT reflected in
+//    the other; they exist to prove the two implementations agree on
+//    the same spec, not to share state.
 export function App(): JSX.Element {
   return (
     <>
@@ -21,7 +31,9 @@ export function App(): JSX.Element {
         <p>state lives in memory · refresh to reset</p>
       </header>
       <main>
+        {/* Spec: 02-crew-lead.md */}
         <CrewLeadsPanel />
+        {/* Static read-only table derived entirely from Tier.canAccess — no service call needed */}
         <section className="panel">
           <header>
             <h2>Tier policy matrix (TP)</h2>
@@ -33,10 +45,15 @@ export function App(): JSX.Element {
             </p>
           </div>
         </section>
+        {/* Spec: 03-passenger.md */}
         <PassengersPanel />
+        {/* Spec: 04-resource.md */}
         <ResourcesPanel />
+        {/* Spec: 05-access.md — emits a UsageEvent on every attempt */}
         <AccessPanel />
+        {/* Spec: 07-reporting.md */}
         <ReportsPanel />
+        {/* Spec: 06-audit.md — shows AdminEvents from all crew-lead mutations */}
         <AuditLogPanel />
         <p className="muted">
           The panels above run a TypeScript port of the rules entirely in the
@@ -44,6 +61,7 @@ export function App(): JSX.Element {
           over HTTP — the two keep <em>independent</em> state, so changes in
           one will not show up in the other.
         </p>
+        {/* HTTP client panel — only functional when `cargo run --features http --bin serve` is running */}
         <LiveServerPanel />
       </main>
       <footer>

@@ -11,6 +11,8 @@ export function AccessPanel(): JSX.Element {
   const [rid, setRid] = useState<string>(resources[0]?.id ?? "");
 
   // Keep selections valid as the lists change.
+  // If the stored id was deleted from the list, fall back to the first
+  // available option so the dropdowns never show an empty/stale value.
   const validPid = passengers.find((p) => p.id === pid)?.id ?? passengers[0]?.id ?? "";
   const validRid = resources.find((r) => r.id === rid)?.id ?? resources[0]?.id ?? "";
 

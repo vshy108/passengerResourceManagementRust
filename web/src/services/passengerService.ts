@@ -8,8 +8,13 @@ import { requireCrewLead } from "./guards";
 
 // Mirrors application/passenger_service.rs (PS-R1..R9).
 export class PassengerService {
+  // Active passengers: the live list returned by list().
+  // Separated from deleted so list() is O(n) without filtering.
   private active: Passenger[] = [];
+  // Soft-deleted passengers: kept so get() can still resolve them
+  // for audit-trail display (PS-R5 / PS-R9).
   private deleted: Passenger[] = [];
+  // Monotonic id counter for AdminEvent records emitted by this service.
   private nextAuditId = 1;
   constructor(
     private readonly clock: ManualClock,
@@ -72,6 +77,10 @@ export class PassengerService {
     return err("PassengerNotFound");
   }
 
+  // Private helper: stamps and emits an AdminEvent so the audit
+  // trail stays in sync with every successful mutation. The action
+  // union is narrowed to only passenger-relevant variants so an
+  // accidental "ResourceCreated" here is a compile error.
   private emitEvent(
     actorId: CrewLeadId,
     action: "PassengerCreated" | "PassengerTierChanged" | "PassengerDeleted",

@@ -78,6 +78,33 @@ cargo run --features http --bin serve
 # → PRMS HTTP server listening on http://127.0.0.1:8080
 ```
 
+### API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Liveness check |
+| `GET` | `/openapi.json` | Full OpenAPI 3.x spec |
+| `GET` | `/crew-leads` | List all Crew Leads |
+| `POST` | `/crew-leads` | Add a Crew Lead (rejected if count already 3) |
+| `PUT` | `/crew-leads/{id}` | Replace a Crew Lead (count stays 3) |
+| `DELETE` | `/crew-leads/{id}` | Remove a Crew Lead (always rejected — use replace) |
+| `GET` | `/passengers` | List active passengers |
+| `POST` | `/passengers` | Create a passenger (Crew Lead only) |
+| `DELETE` | `/passengers/{id}` | Soft-delete a passenger (Crew Lead only) |
+| `PATCH` | `/passengers/{id}/tier` | Change a passenger's tier (Crew Lead only) |
+| `GET` | `/resources` | List active resources |
+| `POST` | `/resources` | Create a resource (Crew Lead only) |
+| `DELETE` | `/resources/{id}` | Soft-delete a resource (Crew Lead only) |
+| `PATCH` | `/resources/{id}/min-tier` | Change a resource's min tier (Crew Lead only) |
+| `GET` | `/resources/accessible` | List resources accessible to the caller's tier |
+| `POST` | `/access` | Attempt to use a resource (Passenger only) |
+| `GET` | `/audit` | List all `AdminEvent`s |
+| `GET` | `/usage` | List all `UsageEvent`s |
+| `GET` | `/reports/by-tier` | Aggregate usage counts by passenger tier |
+| `GET` | `/reports/top-resources` | Top-N resources by allowed-use count |
+| `GET` | `/reports/personal-history/{id}` | Personal usage history for a passenger |
+| `POST` | `/reset` | Reset in-memory state (demo only) |
+
 State is in-process and resets on restart. Quick smoke test:
 
 ```bash

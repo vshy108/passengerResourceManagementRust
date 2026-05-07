@@ -10,9 +10,13 @@ import type { ResourceService } from "./resourceService";
 // Mirrors application/access_service.rs (AC-R1..R7).
 //
 // AC-R5 — every access attempt emits a UsageEvent (allowed OR denied).
-// AC-R6 — the actor must be the same passenger as the subject.
+// The event records tier snapshots at the time of attempt so later
+// tier changes do not retroactively reclassify history (AC-R6).
 export class AccessService {
+  // All events in insertion order. Append-only — never removed.
   private events: UsageEvent[] = [];
+  // Monotonic counter for event ids, unique across the lifetime of
+  // this service instance.
   private nextId = 1;
   constructor(
     private readonly clock: ManualClock,

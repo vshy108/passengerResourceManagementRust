@@ -16,12 +16,16 @@ export interface World {
   resources: ResourceService;
   access: AccessService;
   reporting: ReportingService;
+  // Shared append-only buffer all services write admin events into.
+  // Exposed so AuditLogPanel can read the full trail.
   adminEvents: AdminEvent[];
 }
 
 export function buildWorld(): World {
   const clock = new ManualClock();
   const adminEvents: AdminEvent[] = [];
+  // Single callback passed to every service so they all write to the
+  // same buffer — mirrors InMemoryAdminEventSink cloning in Rust.
   const emit = (e: AdminEvent): void => {
     adminEvents.push(e);
   };

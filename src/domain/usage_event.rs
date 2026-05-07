@@ -18,13 +18,21 @@ pub enum Outcome {
 // self-explanatory even after later upgrades/downgrades.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageEvent {
-    // Monotonic event id (assigned by the sink, not the caller).
-    // `u64` because we expect more events than passengers/resources.
+    /// Monotonic event id assigned by the sink. `u64` because the event
+    /// volume is expected to exceed the number of passengers/resources.
     pub id: u64,
     pub passenger_id: PassengerId,
     pub resource_id: ResourceId,
+    /// Snapshot of the passenger's tier AT THE TIME of the attempt.
+    /// Immutable after emission — later tier changes do not retroactively
+    /// reclassify this event (AC-R6 / RP-R3).
     pub tier_at_attempt: Tier,
+    /// Snapshot of the resource's min_tier AT THE TIME of the attempt.
+    /// Same immutability guarantee as `tier_at_attempt`.
     pub min_tier_at_attempt: Tier,
+    /// Timestamp from the injected `Clock` at the moment of the call.
     pub timestamp: Timestamp,
+    /// Whether the access was allowed or denied. A `Denied` event is
+    /// still stored — it serves as the audit record of the failed attempt.
     pub outcome: Outcome,
 }
