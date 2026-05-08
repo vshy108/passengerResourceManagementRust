@@ -11,6 +11,7 @@ This file records senior-review gaps found while preparing the project for code 
 - [x] Fix README drift: entity persistence is currently service-owned in-memory state; event sinks are behind ports.
 - [x] Fix README drift: there is no strict ID format validation yet; request DTOs validate JSON shape and enums.
 - [x] Document `cargo nextest` install/fallback path.
+- [x] Fix README drift: web app is now a React thin client backed by the Rust API, not a TypeScript port of the services running in the browser.
 
 ## Code / Product Follow-Ups
 
@@ -32,5 +33,5 @@ This file records senior-review gaps found while preparing the project for code 
 ## Senior-Review Positioning
 
 - [ ] Present the project as complete for the scoped assignment, not production-complete.
-- [ ] Be explicit that in-memory state, simulated identity, and manual TypeScript API types are known trade-offs.
+- [ ] Be explicit that in-memory state and simulated identity are known trade-offs.
 - [ ] Use the spec -> test -> service -> HTTP -> React path as the primary live review narrative.

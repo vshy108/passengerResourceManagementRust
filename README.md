@@ -30,7 +30,7 @@ For a fast review, follow one vertical slice:
   [`src/application/access_service.rs`](./src/application/access_service.rs).
 4. Check the HTTP adapter in [`src/interface/http.rs`](./src/interface/http.rs)
   and DTOs in [`src/interface/dto.rs`](./src/interface/dto.rs).
-5. Try the optional React demo in [`web/`](./web) or read
+5. Run the React thin client in [`web/`](./web) or read
   [`docs/code-review-qa.md`](./docs/code-review-qa.md) for review prep.
 
 ## Layout
@@ -44,7 +44,7 @@ src/
   bin/             # binary entrypoints (serve)
 specs/             # numbered rules, invariants, scenarios
 tests/             # one integration file per spec slice
-web/               # optional React + TypeScript browser demo
+web/               # React thin client (all content fetched from Rust backend)
 ```
 
 Dependency direction is inward only:
@@ -63,10 +63,11 @@ Dependency direction is inward only:
 | `specs/06-audit.md`                | Admin audit trail  |
 | `specs/07-reporting.md`            | Reporting queries  |
 
-## Web demo (optional)
+## React thin client
 
-A TypeScript port of the same services with a small React UI lives in
-[`web/`](./web). See [`web/README.md`](./web/README.md) for run instructions.
+A React thin client lives in [`web/`](./web). It fetches all content
+from the Rust axum backend — no local TypeScript services or in-browser
+state. See [`web/README.md`](./web/README.md) for run instructions.
 
 ## HTTP server (optional)
 
@@ -207,10 +208,10 @@ so the type system catches mix-ups at compile time. Errors are a single
   explicit `rank()` rather than deriving `Ord` on the enum so the
   ordering is documented in code and stays stable if variants are
   reordered.
-- **Two demo surfaces (HTTP + React).** The HTTP adapter is gated behind
-  the `http` Cargo feature, and the web demo lives in a separate `web/`
-  project so the core crate stays dependency-light. CI runs both Rust
-  feature configurations and the web checks.
+- **HTTP + React thin client.** The HTTP adapter is gated behind the
+  `http` Cargo feature, and the React thin client lives in a separate
+  `web/` project so the core crate stays dependency-light. CI runs both
+  Rust feature configurations and the web build.
 - **OpenAPI is generated, not handwritten.** `utoipa` derives the
   schema from the same DTOs the handlers use, so the spec cannot
   drift from the wire format.
@@ -247,8 +248,6 @@ The HTTP server is a demo affordance, not a production target:
   no authentication layer (see [`AGENTS.md`](./AGENTS.md) §8).
 - `POST /reset` is gated by "must be a known crew lead" but is still
   intended for local demo / test use only.
-- The web client and the HTTP server keep **independent** in-process
-  state — mutations in one are not visible in the other.
 - CORS defaults to `Any` for dev convenience; set `PRMS_CORS_ORIGINS`
   before exposing the server beyond localhost.
 - There is no durable storage, pagination, or stable event-ID sequence
@@ -268,6 +267,6 @@ that added unnecessary infrastructure, hidden global state, broad rewrites,
 or `unwrap()`/`expect()` on expected failure paths were rejected.
 
 Verification was done independently by reading diffs, checking spec-to-test
-traceability, running the Rust and web test/build commands in CI, and
+traceability, running the Rust test/build commands and the web build in CI, and
 reasoning through edge cases such as denied access, soft-delete, and audit
 snapshot stability.
