@@ -29,7 +29,9 @@ This file records senior-review gaps found while preparing the project for code 
 - [ ] Remove or strongly protect `/reset` outside demo mode.
 - [ ] Add pagination for growing endpoints such as `/usage`, `/audit`, and list endpoints.
 - [ ] Add metrics, alerts, and deeper health checks.
-- [ ] Restrict CORS origins for non-local deployments.
+- [x] Restrict CORS origins for non-local deployments.
+  `PRMS_CORS_ORIGINS` already enforces an allow-list when set; added a
+  `tracing::warn!` at startup when CORS is `Any` so operators are alerted.
 - [ ] Add stable event IDs across restarts (database sequence, UUID, or persisted counter).
 
 ## Senior-Review Positioning

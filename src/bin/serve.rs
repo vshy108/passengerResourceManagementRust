@@ -75,7 +75,16 @@ async fn main() -> ExitCode {
     // can match against string slices below.
     let cors = match args.cors_origins.as_deref() {
         // Match BOTH `None` AND `Some("")` in one arm with `|`.
-        None | Some("") => CorsOrigins::Any,
+        // WARN: Any origin is allowed — set PRMS_CORS_ORIGINS before exposing
+        // the server beyond localhost. This is safe for local dev only.
+        None | Some("") => {
+            tracing::warn!(
+                "CORS is set to Any (all origins allowed). \
+                 Set PRMS_CORS_ORIGINS to a comma-separated allow-list before \
+                 exposing this server beyond localhost."
+            );
+            CorsOrigins::Any
+        }
         Some(list) => {
             let mut parsed: Vec<HeaderValue> = Vec::new();
             // Iterator pipeline: split on ',', trim each, drop empties.
