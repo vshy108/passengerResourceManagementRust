@@ -302,6 +302,23 @@ pub struct TopNQuery {
     pub n: Option<usize>,
 }
 
+/// Offset-based pagination query parameters.
+/// `offset` defaults to 0; `limit` defaults to 100 (max 1000).
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct PaginationQuery {
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+impl PaginationQuery {
+    pub fn offset(&self) -> usize {
+        self.offset.unwrap_or(0)
+    }
+    pub fn limit(&self) -> usize {
+        self.limit.unwrap_or(100).min(1000)
+    }
+}
+
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct AccessibleQuery {
     pub tier: TierDto,

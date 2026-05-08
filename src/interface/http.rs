@@ -43,9 +43,9 @@ use crate::domain::tier::Tier;
 use crate::interface::composition_root::{World, build_demo_world};
 use crate::interface::dto::{
     AccessibleQuery, ActorOnlyReq, AddCrewLeadReq, AdminEventDto, ChangeTierReq,
-    CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, OutcomeDto, PassengerDto,
-    RemoveCrewLeadReq, ReplaceCrewLeadReq, ResourceDto, TierCountsDto, TierDto, TopNQuery,
-    TopResourceDto, UsageEventDto, UseResourceReq,
+    CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, OutcomeDto, PaginationQuery,
+    PassengerDto, RemoveCrewLeadReq, ReplaceCrewLeadReq, ResourceDto, TierCountsDto, TierDto,
+    TopNQuery, TopResourceDto, UsageEventDto, UseResourceReq,
 };
 
 /// Shared state held by every handler.
@@ -422,21 +422,31 @@ async fn use_resource(State(state): State<AppState>, Json(req): Json<UseResource
 }
 
 #[utoipa::path(get, path = "/audit", tag = "audit",
+    params(PaginationQuery),
     responses((status = 200, body = Vec<AdminEventDto>)))]
-async fn list_admin_events(State(state): State<AppState>) -> Json<Vec<AdminEventDto>> {
+async fn list_admin_events(
+    State(state): State<AppState>,
+    Query(page): Query<PaginationQuery>,
+) -> Json<Vec<AdminEventDto>> {
     let w = lock_world(&state);
     Json(
         w.audit_sink
             .snapshot()
             .iter()
+            .skip(page.offset())
+            .take(page.limit())
             .map(AdminEventDto::from)
             .collect(),
     )
 }
 
 #[utoipa::path(get, path = "/usage", tag = "audit",
+    params(PaginationQuery),
     responses((status = 200, body = Vec<UsageEventDto>)))]
-async fn list_usage_events(State(state): State<AppState>) -> Json<Vec<UsageEventDto>> {
+async fn list_usage_events(
+    State(state): State<AppState>,
+    Query(page): Query<PaginationQuery>,
+) -> Json<Vec<UsageEventDto>> {
     use crate::application::ports::UsageEventSource;
     let w = lock_world(&state);
     Json(
@@ -444,6 +454,8 @@ async fn list_usage_events(State(state): State<AppState>) -> Json<Vec<UsageEvent
             .sink()
             .list()
             .iter()
+            .skip(page.offset())
+            .take(page.limit())
             .map(UsageEventDto::from)
             .collect(),
     )

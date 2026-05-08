@@ -33,7 +33,9 @@ This file records senior-review gaps found while preparing the project for code 
   `/reset` is now opt-in via `--enable-reset` / `PRMS_ENABLE_RESET` (default `false`).
   The route is not registered at all unless the flag is set; a `tracing::warn!` fires
   at startup if it is enabled.
-- [ ] Add pagination for growing endpoints such as `/usage`, `/audit`, and list endpoints.
+- [x] Add pagination for growing endpoints such as `/usage`, `/audit`, and list endpoints.
+  Added `?offset=N&limit=N` (default 0/100, max 1000) to `/audit` and `/usage` via
+  `PaginationQuery` in dto.rs. OpenAPI spec reflects the new params.
 - [ ] Add metrics, alerts, and deeper health checks.
 - [x] Restrict CORS origins for non-local deployments.
   `PRMS_CORS_ORIGINS` already enforces an allow-list when set; added a
