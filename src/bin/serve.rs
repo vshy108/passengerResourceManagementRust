@@ -8,6 +8,8 @@
 //! - `--bind` / `PRMS_BIND` (default `127.0.0.1:8080`)
 //! - `--cors-origins` / `PRMS_CORS_ORIGINS` — comma-separated list of
 //!   allowed origins. When unset, CORS allows any origin (dev default).
+//! - `--enable-reset` / `PRMS_ENABLE_RESET` — register the `/reset` route
+//!   (default: false). Never enable this in production.
 //! - `--shutdown-grace-secs` / `PRMS_SHUTDOWN_GRACE_SECS` (default 10)
 
 use std::net::SocketAddr;
@@ -45,6 +47,11 @@ struct Args {
     // No default -> Option<String>. None when the flag and env are absent.
     #[arg(long, env = "PRMS_CORS_ORIGINS")]
     cors_origins: Option<String>,
+
+    /// Register the `/reset` endpoint. NEVER enable in production.
+    // `default_value_t = false` makes this opt-in rather than opt-out.
+    #[arg(long, env = "PRMS_ENABLE_RESET", default_value_t = false)]
+    enable_reset: bool,
 
     /// Maximum seconds to wait for in-flight requests to drain after
     /// SIGINT before forcibly exiting.
@@ -117,7 +124,13 @@ async fn main() -> ExitCode {
 
     // Build the router and add request tracing as the OUTERMOST layer
     // (logs every request/response pair).
-    let app = router_with(state, cors).layer(TraceLayer::new_for_http());
+    let app = router_with(state, cors, args.enable_reset).layer(TraceLayer::new_for_http());
+    if args.enable_reset {
+        tracing::warn!(
+            "The /reset endpoint is enabled. This wipes all state and must \
+             never be reachable in production."
+        );
+    }
 
     let addr = args.bind;
     // `.await` suspends the async function until the future completes.

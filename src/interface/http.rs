@@ -66,13 +66,17 @@ pub enum CorsOrigins {
 
 /// Build the axum router with CORS and the full PRMS endpoint surface.
 ///
-/// Equivalent to [`router_with`] using `CorsOrigins::Any`.
+/// Equivalent to [`router_with`] using `CorsOrigins::Any` and reset disabled.
 pub fn router(state: AppState) -> Router {
-    router_with(state, CorsOrigins::Any)
+    router_with(state, CorsOrigins::Any, false)
 }
 
 /// Build the axum router with explicit CORS configuration.
-pub fn router_with(state: AppState, cors_origins: CorsOrigins) -> Router {
+///
+/// `enable_reset` — when `false` the `/reset` route is not registered,
+/// making it impossible to wipe state via the HTTP API. Set to `true`
+/// only for local dev / integration tests.
+pub fn router_with(state: AppState, cors_origins: CorsOrigins, enable_reset: bool) -> Router {
     let cors = match cors_origins {
         CorsOrigins::Any => CorsLayer::new()
             .allow_origin(Any)
@@ -127,8 +131,12 @@ pub fn router_with(state: AppState, cors_origins: CorsOrigins) -> Router {
             "/reports/history/{passenger_id}",
             get(report_personal_history),
         )
-        // admin
-        .route("/reset", post(reset_world))
+        // admin — only registered when explicitly enabled (not in production)
+        .merge(if enable_reset {
+            Router::new().route("/reset", post(reset_world))
+        } else {
+            Router::new()
+        })
         // Inject shared state into every handler that uses `State<AppState>`.
         .with_state(state)
         // 64 KiB body cap — every request DTO in this app is tiny.

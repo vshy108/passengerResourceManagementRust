@@ -40,7 +40,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use passenger_resource_management::interface::composition_root::build_demo_world;
-use passenger_resource_management::interface::http::router;
+use passenger_resource_management::interface::http::{router_with, CorsOrigins};
 
 // `pub const` — a compile-time constant, inlined at every use site.
 // Convention: SCREAMING_SNAKE_CASE.
@@ -51,7 +51,9 @@ pub const ARIA: &str = "cl-aria";
 pub fn app() -> Router {
     let world = build_demo_world().expect("bootstrap");
     let state = Arc::new(Mutex::new(world));
-    router(state)
+    // FIX: router() now defaults to enable_reset=false; tests need /reset
+    // to exercise the endpoint, so we call router_with explicitly.
+    router_with(state, CorsOrigins::Any, true)
 }
 
 /// Send a request through the router in-process and return (status, body).

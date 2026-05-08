@@ -104,7 +104,7 @@ cargo run --features http --bin serve
 | `GET` | `/reports/by-tier` | Aggregate usage counts by passenger tier |
 | `GET` | `/reports/top-resources` | Top-N resources by allowed-use count |
 | `GET` | `/reports/personal-history/{id}` | Personal usage history for a passenger |
-| `POST` | `/reset` | Reset in-memory state (demo only) |
+| `POST` | `/reset` | Reset in-memory state — only registered when `PRMS_ENABLE_RESET=true` |
 
 State is in-process and resets on restart. Quick smoke test:
 
@@ -124,6 +124,7 @@ All flags also read from the matching environment variable:
 | ----------------------- | -------------------------- | ------------------ | ---------------------------------------------------- |
 | `--bind`                | `PRMS_BIND`                | `127.0.0.1:8080`   | Listen address                                       |
 | `--cors-origins`        | `PRMS_CORS_ORIGINS`        | _unset_ (`Any`)    | Comma-separated allow-list, e.g. `https://app.x26`   |
+| `--enable-reset`        | `PRMS_ENABLE_RESET`        | `false`            | Register the `/reset` route (local dev only)         |
 | `--shutdown-grace-secs` | `PRMS_SHUTDOWN_GRACE_SECS` | `10`               | Max seconds to drain in-flight requests after SIGINT |
 | `RUST_LOG`              | _(env only)_               | `info`             | tracing-subscriber filter                            |
 

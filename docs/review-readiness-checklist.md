@@ -26,7 +26,10 @@ This file records senior-review gaps found while preparing the project for code 
 
 - [ ] Add real authentication and derive `Actor` from trusted identity, not request body fields.
 - [ ] Add persistent storage with migrations, backups, and append-only event tables.
-- [ ] Remove or strongly protect `/reset` outside demo mode.
+- [x] Remove or strongly protect `/reset` outside demo mode.
+  `/reset` is now opt-in via `--enable-reset` / `PRMS_ENABLE_RESET` (default `false`).
+  The route is not registered at all unless the flag is set; a `tracing::warn!` fires
+  at startup if it is enabled.
 - [ ] Add pagination for growing endpoints such as `/usage`, `/audit`, and list endpoints.
 - [ ] Add metrics, alerts, and deeper health checks.
 - [x] Restrict CORS origins for non-local deployments.
