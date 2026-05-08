@@ -25,7 +25,9 @@ use clap::Parser;
 // Importing from the LIBRARY crate by its package name (replace
 // hyphens with underscores). This binary is separate from `lib.rs` —
 // it links against it like any external consumer.
-use passenger_resource_management::interface::composition_root::build_demo_world;
+use passenger_resource_management::interface::composition_root::{
+    build_demo_world, build_world_with_sqlite,
+};
 use passenger_resource_management::interface::http::{CorsOrigins, router_with};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
@@ -52,6 +54,12 @@ struct Args {
     // `default_value_t = false` makes this opt-in rather than opt-out.
     #[arg(long, env = "PRMS_ENABLE_RESET", default_value_t = false)]
     enable_reset: bool,
+
+    /// Path to the SQLite database file. When unset, state is in-memory
+    /// only and resets on restart. Set to a persistent path in production
+    /// to survive restarts (event logs are durable; entity state is not).
+    #[arg(long, env = "PRMS_DB_PATH")]
+    db_path: Option<String>,
 
     /// Maximum seconds to wait for in-flight requests to drain after
     /// SIGINT before forcibly exiting.
@@ -111,11 +119,26 @@ async fn main() -> ExitCode {
         }
     };
 
-    let world = match build_demo_world() {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("failed to bootstrap demo world: {e}");
-            return ExitCode::from(1);
+    let world = match args.db_path.as_deref() {
+        Some(path) => {
+            tracing::info!("SQLite event store: {path}");
+            match build_world_with_sqlite(path) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("failed to open SQLite database at {path:?}: {e}");
+                    return ExitCode::from(1);
+                }
+            }
+        }
+        None => {
+            tracing::info!("Using in-memory event store (set PRMS_DB_PATH for persistence).");
+            match build_demo_world() {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("failed to bootstrap demo world: {e}");
+                    return ExitCode::from(1);
+                }
+            }
         }
     };
     // Wrap the World in Arc<Mutex<...>> for sharing across handlers.

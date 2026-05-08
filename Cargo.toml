@@ -10,7 +10,7 @@ publish = false
 default = []
 # Optional HTTP adapter. Pulls in axum/tokio/serde and enables the
 # `serve` binary. The core library and tests do not depend on this.
-http = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tracing-subscriber", "dep:clap", "dep:utoipa"]
+http = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tracing-subscriber", "dep:clap", "dep:utoipa", "dep:rusqlite"]
 
 [dependencies]
 thiserror = "2"
@@ -24,6 +24,10 @@ tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 clap = { version = "4", features = ["derive", "env"], optional = true }
 utoipa = { version = "5", features = ["axum_extras"], optional = true }
+# SQLite adapter — `bundled` compiles the SQLite amalgamation from source,
+# eliminating the system-SQLite dependency. Part of the `http` feature
+# so the domain/application layers stay I/O-free.
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

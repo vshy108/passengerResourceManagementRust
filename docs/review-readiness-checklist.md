@@ -28,7 +28,15 @@ This file records senior-review gaps found while preparing the project for code 
 ## Production Readiness Follow-Ups
 
 - [ ] Add real authentication and derive `Actor` from trusted identity, not request body fields.
-- [ ] Add persistent storage with migrations, backups, and append-only event tables.
+- [x] Add persistent storage with migrations, backups, and append-only event tables.
+  SQLite-backed event sinks added (`src/infrastructure/sqlite_event_store.rs`).
+  `SqliteUsageEventSink` and `SqliteAdminEventSink` write-through: every `append()`
+  is persisted before the in-memory cache is updated. On startup, existing rows are
+  loaded so prior runs' events are immediately visible. Entity state (passengers,
+  resources, crew leads) still lives in memory — a documented trade-off.
+  Set `PRMS_DB_PATH=/path/to/prms.db` (or `--db-path`) to enable. Without it the
+  server falls back to the in-memory demo world. Schema: two append-only tables
+  (`usage_events`, `admin_events`), WAL mode enabled. 8 unit tests use `:memory:`.
 - [x] Remove or strongly protect `/reset` outside demo mode.
   `/reset` is now opt-in via `--enable-reset` / `PRMS_ENABLE_RESET` (default `false`).
   The route is not registered at all unless the flag is set; a `tracing::warn!` fires
