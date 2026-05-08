@@ -3,15 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Browser demo for the Spaceship X26 Passenger Resource Management System. Mirrors the Rust specs in TypeScript so every feature is exercised end-to-end without a backend.",
+  "description": "Thin-client frontend for the Spaceship X26 Passenger Resource Management System. All content is fetched from the Rust axum backend.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "coverage": "vitest run --coverage",
     "lint": "eslint ."
   },
   "dependencies": {
@@ -23,14 +20,12 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^5.1.4",
-    "@vitest/coverage-v8": "^4.1.5",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
     "typescript": "~5.6.3",
     "typescript-eslint": "^8.59.0",
-    "vite": "^7.3.2",
-    "vitest": "^4.1.5"
+    "vite": "^7.3.2"
   }
 }

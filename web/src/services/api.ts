@@ -9,9 +9,12 @@
 // demo so error handling is uniform between the in-process services
 // and live API calls.
 
-import type { DomainError, Result } from "../domain/errors";
-import { err, ok } from "../domain/errors";
 import type { Tier } from "../domain/tier";
+
+export type DomainError = string;
+export type Result<T> = { ok: true; value: T } | { ok: false; error: DomainError };
+function ok<T>(value: T): Result<T> { return { ok: true, value }; }
+function err(error: DomainError): Result<never> { return { ok: false, error }; }
 
 /**
  * Resolved at every call so vitest (and other consumers) can override
