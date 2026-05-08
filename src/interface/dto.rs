@@ -343,3 +343,17 @@ pub struct ErrorBody {
     pub error: String,
     pub code: String,
 }
+
+// ---------- health ready ------------------------------------------------
+
+/// Response body for `GET /health/ready`.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct HealthReadyDto {
+    /// Always `"ready"` on a 200 response.
+    pub status: String,
+    pub crew_leads: usize,
+    pub passengers_active: usize,
+    pub resources_active: usize,
+    pub usage_events: usize,
+    pub admin_events: usize,
+}

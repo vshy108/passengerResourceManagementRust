@@ -151,3 +151,39 @@ async fn oversized_body_is_rejected_with_413() {
     let res = app.clone().oneshot(r).await.unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
+
+#[tokio::test]
+async fn health_ready_returns_entity_counts() {
+    let app = app();
+    let (status, body) = send(&app, req(Method::GET, "/health/ready", None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"].as_str().unwrap(), "ready");
+    // Demo world seeds 3 crew leads, 3 passengers, 3 resources.
+    assert_eq!(body["crew_leads"].as_u64().unwrap(), 3);
+    assert_eq!(body["passengers_active"].as_u64().unwrap(), 3);
+    assert_eq!(body["resources_active"].as_u64().unwrap(), 3);
+    // No access events yet in a fresh world.
+    assert_eq!(body["usage_events"].as_u64().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn metrics_returns_prometheus_text() {
+    let app = app();
+    let r = req(Method::GET, "/metrics", None);
+    let res = app.clone().oneshot(r).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let ct = res
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(ct.contains("text/plain"));
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let text = std::str::from_utf8(&bytes).unwrap();
+    // Check a representative metric is present.
+    assert!(text.contains("prms_crew_leads_total 3"));
+    assert!(text.contains("prms_passengers_active_total 3"));
+    assert!(text.contains("prms_resources_active_total 3"));
+    assert!(text.contains("prms_usage_events_total 0"));
+}

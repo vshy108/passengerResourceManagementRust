@@ -43,9 +43,9 @@ use crate::domain::tier::Tier;
 use crate::interface::composition_root::{World, build_demo_world};
 use crate::interface::dto::{
     AccessibleQuery, ActorOnlyReq, AddCrewLeadReq, AdminEventDto, ChangeTierReq,
-    CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, OutcomeDto, PaginationQuery,
-    PassengerDto, RemoveCrewLeadReq, ReplaceCrewLeadReq, ResourceDto, TierCountsDto, TierDto,
-    TopNQuery, TopResourceDto, UsageEventDto, UseResourceReq,
+    CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, HealthReadyDto, OutcomeDto,
+    PaginationQuery, PassengerDto, RemoveCrewLeadReq, ReplaceCrewLeadReq, ResourceDto,
+    TierCountsDto, TierDto, TopNQuery, TopResourceDto, UsageEventDto, UseResourceReq,
 };
 
 /// Shared state held by every handler.
@@ -94,6 +94,8 @@ pub fn router_with(state: AppState, cors_origins: CorsOrigins, enable_reset: boo
     // one more endpoint registered. `Router::new()` starts empty.
     Router::new()
         .route("/health", get(health))
+        .route("/health/ready", get(health_ready))
+        .route("/metrics", get(metrics))
         .route("/openapi.json", get(openapi_json))
         // crew leads
         // `.post(handler)` chained after `.get(...)` registers a second
@@ -216,6 +218,82 @@ fn lock_world(state: &AppState) -> std::sync::MutexGuard<'_, World> {
 // with `text/plain` and 200 OK.
 async fn health() -> &'static str {
     "ok"
+}
+
+#[utoipa::path(get, path = "/health/ready", tag = "system",
+    responses(
+        (status = 200, description = "System ready — entity counts included", body = HealthReadyDto),
+        (status = 503, description = "World mutex poisoned", body = ErrorBody),
+    ))]
+async fn health_ready(State(state): State<AppState>) -> Response {
+    use crate::application::ports::UsageEventSource;
+    match state.lock() {
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorBody {
+                error: "world mutex poisoned".into(),
+                code: "InternalError".into(),
+            }),
+        )
+            .into_response(),
+        Ok(w) => Json(HealthReadyDto {
+            status: "ready".into(),
+            crew_leads: w.crew_leads.list().len(),
+            passengers_active: w.passengers.list().len(),
+            resources_active: w.resources.list().len(),
+            usage_events: w.access.sink().list().len(),
+            admin_events: w.audit_sink.snapshot().len(),
+        })
+        .into_response(),
+    }
+}
+
+/// Prometheus text format metrics. Not included in the OpenAPI spec
+/// (Prometheus scraping is a separate concern from the REST API).
+async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
+    use crate::application::ports::UsageEventSource;
+    use crate::domain::usage_event::Outcome;
+    let w = lock_world(&state);
+    let usage = w.access.sink().list();
+    let allowed = usage.iter().filter(|e| e.outcome == Outcome::Allowed).count();
+    let denied = usage.iter().filter(|e| e.outcome == Outcome::Denied).count();
+    let body = format!(
+        "# HELP prms_crew_leads_total Active crew leads.\n\
+         # TYPE prms_crew_leads_total gauge\n\
+         prms_crew_leads_total {crew_leads}\n\
+         # HELP prms_passengers_active_total Active passengers.\n\
+         # TYPE prms_passengers_active_total gauge\n\
+         prms_passengers_active_total {passengers}\n\
+         # HELP prms_resources_active_total Active resources.\n\
+         # TYPE prms_resources_active_total gauge\n\
+         prms_resources_active_total {resources}\n\
+         # HELP prms_usage_events_total Total usage events recorded.\n\
+         # TYPE prms_usage_events_total counter\n\
+         prms_usage_events_total {usage_total}\n\
+         # HELP prms_usage_events_allowed_total Usage events with Allowed outcome.\n\
+         # TYPE prms_usage_events_allowed_total counter\n\
+         prms_usage_events_allowed_total {allowed}\n\
+         # HELP prms_usage_events_denied_total Usage events with Denied outcome.\n\
+         # TYPE prms_usage_events_denied_total counter\n\
+         prms_usage_events_denied_total {denied}\n\
+         # HELP prms_admin_events_total Total admin events recorded.\n\
+         # TYPE prms_admin_events_total counter\n\
+         prms_admin_events_total {admin}\n",
+        crew_leads = w.crew_leads.list().len(),
+        passengers = w.passengers.list().len(),
+        resources = w.resources.list().len(),
+        usage_total = usage.len(),
+        allowed = allowed,
+        denied = denied,
+        admin = w.audit_sink.snapshot().len(),
+    );
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        body,
+    )
 }
 
 #[utoipa::path(get, path = "/crew-leads", tag = "crew-leads",
@@ -643,7 +721,7 @@ async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq
         description = "Spaceship X26 Passenger Resource Management System."
     ),
     paths(
-        health,
+        health, health_ready,
         list_crew_leads, add_crew_lead, replace_crew_lead, remove_crew_lead,
         list_passengers, create_passenger, get_passenger,
         change_passenger_tier, soft_delete_passenger,
@@ -662,6 +740,7 @@ async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq
         ActorOnlyReq, UseResourceReq,
         UsageEventDto, AdminEventDto,
         TierCountsDto, TopResourceDto,
+        HealthReadyDto,
         ErrorBody,
     )),
     tags(

@@ -36,7 +36,12 @@ This file records senior-review gaps found while preparing the project for code 
 - [x] Add pagination for growing endpoints such as `/usage`, `/audit`, and list endpoints.
   Added `?offset=N&limit=N` (default 0/100, max 1000) to `/audit` and `/usage` via
   `PaginationQuery` in dto.rs. OpenAPI spec reflects the new params.
-- [ ] Add metrics, alerts, and deeper health checks.
+- [x] Add metrics, alerts, and deeper health checks.
+  Added `GET /health/ready` — returns JSON with entity counts (crew leads, passengers,
+  resources, usage events, admin events); returns 503 if the world mutex is poisoned.
+  Added `GET /metrics` — Prometheus text format (no extra crate) with gauges for active
+  entities and counters for usage events (allowed/denied split) and admin events.
+  Both endpoints covered by integration tests in `tests/http_health.rs`.
 - [x] Restrict CORS origins for non-local deployments.
   `PRMS_CORS_ORIGINS` already enforces an allow-list when set; added a
   `tracing::warn!` at startup when CORS is `Any` so operators are alerted.
