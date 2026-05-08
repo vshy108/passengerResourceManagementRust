@@ -28,11 +28,16 @@ This file records senior-review gaps found while preparing the project for code 
   refresh reload. Config in `web/playwright.config.ts`; run `npm run test:e2e` (requires Rust
   server running at 127.0.0.1:8080 with `--enable-reset`). `vite.config.ts` corrected to use
   `vite` (not `vitest/config`) import.
-- [ ] Decide whether to close the remaining coverage gap or keep the 98% line gate with documented rationale.
+- [x] Decide whether to close the remaining coverage gap or keep the 98% line gate with documented rationale.
+  Decision: keep the 98% line gate. The uncovered lines are infrastructure glue (mutex-poison 503 path,
+  `Display` impls on error enums) that are impractical to hit without unsafe thread manipulation.
+  The threshold is documented in `Cargo.toml` (`[profile.test]` / `llvm-cov` config).
 
 ## Production Readiness Follow-Ups
 
 - [ ] Add real authentication and derive `Actor` from trusted identity, not request body fields.
+  **Deferred (out of scope):** simulated identity via request body is a documented trade-off.
+  Noted in `specs/05-access.md` and the README.
 - [x] Add persistent storage with migrations, backups, and append-only event tables.
   SQLite-backed event sinks added (`src/infrastructure/sqlite_event_store.rs`).
   `SqliteUsageEventSink` and `SqliteAdminEventSink` write-through: every `append()`
@@ -67,6 +72,12 @@ This file records senior-review gaps found while preparing the project for code 
 
 ## Senior-Review Positioning
 
-- [ ] Present the project as complete for the scoped assignment, not production-complete.
-- [ ] Be explicit that in-memory state and simulated identity are known trade-offs.
-- [ ] Use the spec -> test -> service -> HTTP -> React path as the primary live review narrative.
+- [x] Present the project as complete for the scoped assignment, not production-complete.
+- [x] Be explicit that in-memory state and simulated identity are known trade-offs.
+- [x] Use the spec -> test -> service -> HTTP -> React path as the primary live review narrative.
+
+## Extras (added during production-readiness pass)
+
+- [x] Pin Node >=22.12 for the web app (`web/.nvmrc` + `engines` field in `web/package.json`).
+  Vite 7 requires Node 20.19+ or 22.12+; `.nvmrc` lets contributors run `nvm use` in the
+  `web/` directory and get the correct version automatically.
