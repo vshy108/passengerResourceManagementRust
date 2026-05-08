@@ -26,6 +26,7 @@ pub enum Tier {
     // NOT define ordering for `<`/`>`; we use `rank()` instead (TP-R1).
     Silver,
     Gold,
+    Diamond,
     Platinum,
 }
 
@@ -63,9 +64,10 @@ impl Tier {
             // No semicolon at the end of an arm's expression — it's the
             // value yielded by that arm, and the whole `match` becomes
             // the function's return value (no explicit `return` needed).
-            Tier::Silver => 1,
-            Tier::Gold => 2,
-            Tier::Platinum => 3,
+            Tier::Silver   => 1,
+            Tier::Gold     => 2,
+            Tier::Diamond  => 3,
+            Tier::Platinum => 4,
         }
     }
 
@@ -82,6 +84,17 @@ impl Tier {
     }
 }
 
+/// Canonical name → variant mapping. **To add a new tier: insert one entry
+/// here in rank order.** `TryFrom<&str>` below is table-driven and needs no
+/// other changes. You still need to add the variant above and a `rank()` arm
+/// (the compiler will point at both).
+const TIER_NAMES: &[(&str, Tier)] = &[
+    ("Silver",   Tier::Silver),
+    ("Gold",     Tier::Gold),
+    ("Diamond",  Tier::Diamond),
+    ("Platinum", Tier::Platinum),
+];
+
 // Implementing the `TryFrom<&str>` trait gives us `Tier::try_from("Gold")`
 // AND, for free, `"Gold".try_into()` (via the blanket `Into`/`TryInto`).
 // We use TryFrom (not From) because parsing can fail.
@@ -89,24 +102,14 @@ impl TryFrom<&str> for Tier {
     // Associated type: which error type `try_from` returns on failure.
     type Error = InvalidTier;
 
-    /// TP-E1 — case-sensitive parse from the canonical capitalised form.
-    // `Result<Self, Self::Error>` = either Ok(Tier) or Err(InvalidTier).
-    // `Self` inside an impl block means the type being implemented (Tier).
+    /// TP-E1 — case-sensitive parse driven by `TIER_NAMES`. Adding a new
+    /// tier requires only one line in that table, not a new match arm here.
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        // Matching on a `&str` against string literals is fine — Rust
-        // compares byte-by-byte. Case-sensitive on purpose: rejecting
-        // "gold" forces clients to send the canonical form (TP-E1).
-        match value {
-            // `Ok(...)` and `Err(...)` are the two variants of `Result`.
-            "Silver" => Ok(Tier::Silver),
-            "Gold" => Ok(Tier::Gold),
-            "Platinum" => Ok(Tier::Platinum),
-            // `other` is a catch-all binding: it captures the unmatched
-            // &str. We must own it before returning (the borrow `value`
-            // could be tied to a short-lived buffer), hence `to_owned()`
-            // which copies the bytes into a new heap `String`.
-            other => Err(InvalidTier(other.to_owned())),
-        }
+        TIER_NAMES
+            .iter()
+            .find(|(name, _)| *name == value)
+            .map(|(_, tier)| *tier)
+            .ok_or_else(|| InvalidTier(value.to_owned()))
     }
 }
 
@@ -190,8 +193,13 @@ mod tests {
     }
 
     #[test]
-    fn tp_r1_s12_rank_platinum_is_three() {
-        assert_eq!(Tier::Platinum.rank(), 3);
+    fn tp_r1_s12_rank_platinum_is_four() {
+        assert_eq!(Tier::Platinum.rank(), 4);
+    }
+
+    #[test]
+    fn tp_r1_s23_rank_diamond_is_three() {
+        assert_eq!(Tier::Diamond.rank(), 3);
     }
 
     // -- TP-E1 parsing (TP-S13..S15) -----------------------------------
@@ -215,5 +223,47 @@ mod tests {
     #[test]
     fn tp_e1_s15_try_from_unknown_is_err() {
         assert!(Tier::try_from("Bronze").is_err());
+    }
+
+    #[test]
+    fn tp_e1_s24_try_from_diamond_ok() {
+        assert_eq!(Tier::try_from("Diamond"), Ok(Tier::Diamond));
+    }
+
+    // -- TP-S16..S22: Diamond access matrix ----------------------------
+
+    #[test]
+    fn tp_r2_s16_diamond_can_access_silver() {
+        assert!(Tier::Diamond.can_access(Tier::Silver));
+    }
+
+    #[test]
+    fn tp_r2_s17_diamond_can_access_gold() {
+        assert!(Tier::Diamond.can_access(Tier::Gold));
+    }
+
+    #[test]
+    fn tp_r2_s18_diamond_can_access_diamond() {
+        assert!(Tier::Diamond.can_access(Tier::Diamond));
+    }
+
+    #[test]
+    fn tp_r2_s19_diamond_cannot_access_platinum() {
+        assert!(!Tier::Diamond.can_access(Tier::Platinum));
+    }
+
+    #[test]
+    fn tp_r2_s20_silver_cannot_access_diamond() {
+        assert!(!Tier::Silver.can_access(Tier::Diamond));
+    }
+
+    #[test]
+    fn tp_r2_s21_gold_cannot_access_diamond() {
+        assert!(!Tier::Gold.can_access(Tier::Diamond));
+    }
+
+    #[test]
+    fn tp_r2_s22_platinum_can_access_diamond() {
+        assert!(Tier::Platinum.can_access(Tier::Diamond));
     }
 }

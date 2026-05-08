@@ -14,7 +14,7 @@ import { TierTag } from "./TierTag";
 
 type Status = "idle" | "checking" | "online" | "offline";
 
-const TIERS: Tier[] = ["Silver", "Gold", "Platinum"];
+const TIERS: Tier[] = ["Silver", "Gold", "Diamond", "Platinum"];
 
 interface LiveState {
   crewLeads: ApiCrewLead[];
@@ -836,6 +836,7 @@ function AccessibleSection(): JSX.Element {
         >
           <option value="Silver">Silver</option>
           <option value="Gold">Gold</option>
+          <option value="Diamond">Diamond</option>
           <option value="Platinum">Platinum</option>
         </select>
       </div>

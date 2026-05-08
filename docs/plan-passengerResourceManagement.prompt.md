@@ -12,7 +12,8 @@ Build a **Passenger Resource Management System** for Spaceship X26 (Earth → Ma
 |---|---|---|
 | Silver | Food Stations, Sleeping Pods, Basic Hygiene | — |
 | Gold | Private Cabins, Adv. Medical Bay | Silver |
-| Platinum | Luxury O2 Pods, VIP Rec Deck | Gold + Silver |
+| Diamond | Luxury O2 Pods | Gold + Silver |
+| Platinum | VIP Rec Deck | Diamond + Gold + Silver + Diamond |
 
 ---
 
@@ -50,7 +51,7 @@ struct AdminEvent { id: Id, actor_id: Id, action: AdminAction,
                     target: TargetRef, timestamp: DateTime<Utc>,
                     details: Option<String> }
 
-enum Tier      { Silver, Gold, Platinum }
+enum Tier      { Silver, Gold, Diamond, Platinum }
 enum Outcome   { Allowed, Denied }
 enum Actor     { CrewLead(Id), Passenger(Id) }            // auth boundary input
 
@@ -92,7 +93,7 @@ enum DomainError {                                         // closed sum, derive
 ```
 
 ### Key policies
-- **Tier policy** (`domain/tier.rs`): `Silver < Gold < Platinum` ranking via
+- **Tier policy** (`domain/tier.rs`): `Silver < Gold < Diamond < Platinum` ranking via
   `Tier::rank()`; `Tier::can_access(passenger_tier, resource_min_tier)`.
 - **Crew Lead count invariant** (CL-I1): enforced inside
   `CrewLeadService::bootstrap` — bootstrap-only, no runtime add/remove.

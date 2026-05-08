@@ -455,11 +455,12 @@ async fn report_by_tier(State(state): State<AppState>) -> Json<Vec<TierCountsDto
             denied: c.denied,
         })
         .collect();
-    // Stable ordering: Silver, Gold, Platinum
+    // Stable ordering: Silver, Gold, Diamond, Platinum
     rows.sort_by_key(|r| match r.tier {
-        TierDto::Silver => 0,
-        TierDto::Gold => 1,
-        TierDto::Platinum => 2,
+        TierDto::Silver   => 0,
+        TierDto::Gold     => 1,
+        TierDto::Diamond  => 2,
+        TierDto::Platinum => 3,
     });
     Json(rows)
 }

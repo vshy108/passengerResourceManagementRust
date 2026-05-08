@@ -148,6 +148,7 @@ th {
 
 .tag.silver { background: #2a313c; }
 .tag.gold { background: #5a4a14; border-color: #8a6f1c; }
+.tag.diamond { background: #1a3a4a; border-color: #2a7a9c; }
 .tag.platinum { background: #28425a; border-color: #3a6a8c; }
 .tag.allowed { background: rgba(63, 185, 80, 0.15); color: var(--green); border-color: rgba(63, 185, 80, 0.4); }
 .tag.denied { background: rgba(248, 81, 73, 0.15); color: var(--red); border-color: rgba(248, 81, 73, 0.4); }

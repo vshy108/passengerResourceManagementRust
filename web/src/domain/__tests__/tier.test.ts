@@ -2,21 +2,29 @@ import { describe, expect, test } from "vitest";
 import { rank, canAccess, parseTier, ALL_TIERS } from "../tier";
 
 describe("tier (TP)", () => {
-  test("TP-R1 ranks ascend Silver < Gold < Platinum", () => {
+  test("TP-R1 ranks ascend Silver < Gold < Diamond < Platinum", () => {
     expect(rank("Silver")).toBe(1);
     expect(rank("Gold")).toBe(2);
-    expect(rank("Platinum")).toBe(3);
+    expect(rank("Diamond")).toBe(3);
+    expect(rank("Platinum")).toBe(4);
   });
 
   test.each([
-    ["Silver", "Silver", true],
-    ["Silver", "Gold", false],
-    ["Silver", "Platinum", false],
-    ["Gold", "Silver", true],
-    ["Gold", "Gold", true],
-    ["Gold", "Platinum", false],
-    ["Platinum", "Silver", true],
-    ["Platinum", "Gold", true],
+    ["Silver",   "Silver",   true],
+    ["Silver",   "Gold",     false],
+    ["Silver",   "Diamond",  false],
+    ["Silver",   "Platinum", false],
+    ["Gold",     "Silver",   true],
+    ["Gold",     "Gold",     true],
+    ["Gold",     "Diamond",  false],
+    ["Gold",     "Platinum", false],
+    ["Diamond",  "Silver",   true],
+    ["Diamond",  "Gold",     true],
+    ["Diamond",  "Diamond",  true],
+    ["Diamond",  "Platinum", false],
+    ["Platinum", "Silver",   true],
+    ["Platinum", "Gold",     true],
+    ["Platinum", "Diamond",  true],
     ["Platinum", "Platinum", true],
   ] as const)("TP-R2 %s on min %s = %s", (p, min, expected) => {
     expect(canAccess(p, min)).toBe(expected);

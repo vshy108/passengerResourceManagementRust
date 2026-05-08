@@ -27,6 +27,7 @@ use crate::domain::usage_event::{Outcome, UsageEvent};
 pub enum TierDto {
     Silver,
     Gold,
+    Diamond,
     Platinum,
 }
 
@@ -38,6 +39,7 @@ impl From<Tier> for TierDto {
         match t {
             Tier::Silver => TierDto::Silver,
             Tier::Gold => TierDto::Gold,
+            Tier::Diamond => TierDto::Diamond,
             Tier::Platinum => TierDto::Platinum,
         }
     }
@@ -48,6 +50,7 @@ impl From<TierDto> for Tier {
         match t {
             TierDto::Silver => Tier::Silver,
             TierDto::Gold => Tier::Gold,
+            TierDto::Diamond => Tier::Diamond,
             TierDto::Platinum => Tier::Platinum,
         }
     }

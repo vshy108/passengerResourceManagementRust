@@ -369,6 +369,34 @@ A: No. The domain and application layers are entirely synchronous. Axum requires
 
 ---
 
+**Q: Why is there a `lock_world` function but no `release_world`?**
+
+A: Because the release is **automatic** — this is Rust's RAII (Resource Acquisition Is Initialization) pattern.
+
+`lock_world` returns a `MutexGuard<'_, World>`. That type implements `Drop`: when the variable holding it goes out of scope, Rust automatically calls its destructor, which releases the mutex. No manual release call exists — or is needed:
+
+```rust
+async fn list_passengers(...) -> Json<Vec<PassengerDto>> {
+    let w = lock_world(&state);   // lock acquired
+    Json(w.passengers.list()...)
+}   // ← w dropped here → lock released automatically
+```
+
+Forgetting to release a lock is therefore **impossible** — the compiler tracks variable lifetimes and enforces the release at drop time. In C you'd call `pthread_mutex_unlock()` by hand and could forget it; in Rust the type system makes that bug unrepresentable.
+
+The one place where the drop timing matters explicitly is `reset_world`, which uses an inner block to force early release before calling `lock_world` a second time:
+
+```rust
+{
+    let w = lock_world(&state);   // lock acquired
+    // check actor is a valid crew lead …
+}   // ← w dropped HERE, lock released
+// safe to lock again:
+*lock_world(&state) = fresh;      // would deadlock if w above were still live
+```
+
+---
+
 ## 8. Error Handling
 
 Related files: [src/domain/errors.rs](../src/domain/errors.rs), [src/interface/http.rs](../src/interface/http.rs), [src/interface/dto.rs](../src/interface/dto.rs), [tests/access.rs](../tests/access.rs), [tests/http_access.rs](../tests/http_access.rs)
