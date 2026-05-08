@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 // Proxy /api/* to the Rust serve binary so the demo runs same-origin
@@ -13,16 +13,6 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
-    },
-  },
-  test: {
-    environment: "node",
-    globals: false,
-    coverage: {
-      provider: "v8",
-      reporter: ["text", "html"],
-      include: ["src/**/*.ts"],
-      exclude: ["src/**/*.test.ts", "src/main.tsx", "src/components/**"],
     },
   },
 });

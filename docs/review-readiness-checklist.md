@@ -22,7 +22,12 @@ This file records senior-review gaps found while preparing the project for code 
   `openapi-typescript` generates `web/src/services/openapi.generated.ts` from the live spec.
   `api.ts` now re-exports all `ApiXxx` and `Tier` types from the generated file.
   Run `npm run generate:types` (with the Rust server running) to regenerate.
-- [ ] Add a Playwright end-to-end flow through the React UI and live Rust API.
+- [x] Add a Playwright end-to-end flow through the React UI and live Rust API.
+  8 tests in `web/e2e/prms.spec.ts` cover: page load + ONLINE status, seeded passenger/resource
+  tables, health/ready counts, access allowed + denied flows, new passenger creation, and
+  refresh reload. Config in `web/playwright.config.ts`; run `npm run test:e2e` (requires Rust
+  server running at 127.0.0.1:8080 with `--enable-reset`). `vite.config.ts` corrected to use
+  `vite` (not `vitest/config`) import.
 - [ ] Decide whether to close the remaining coverage gap or keep the 98% line gate with documented rationale.
 
 ## Production Readiness Follow-Ups
