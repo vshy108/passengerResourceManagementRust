@@ -94,6 +94,28 @@ A: `build_demo_world()` in [`src/interface/composition_root.rs`](../src/interfac
 
 ---
 
+**Q: Why does a `World` struct exist? Why not pass each service individually?**
+
+A: `World` is a **composition root container** — a named struct whose only job is to give `Arc<Mutex<T>>` a single `T` to wrap.
+
+**The problem without it:** Axum's `State<T>` is one generic slot. With five services you would need five separate `Arc<Mutex<...>>` — one per service. That creates three problems:
+1. **Deadlock risk** — if two handlers acquire multiple locks in different orders, they can deadlock.
+2. **Borrow splitting breaks** — the `use_resource` handler needs `passengers` and `resources` as immutable borrows *and* `access` as a mutable borrow simultaneously. Rust's borrow checker can split borrows across *fields of one struct*, but not across separate `MutexGuard`s from separate locks.
+3. **Handler signatures explode** — every handler would carry five `State<Arc<Mutex<...>>>` extractor arguments.
+
+**What `World` gives you:**
+```rust
+pub type AppState = Arc<Mutex<World>>;
+```
+- One lock, one guard, one `State<AppState>` in every handler.
+- `let World { passengers, resources, access, .. } = &mut *w;` gives the borrow checker enough information to approve the split borrows in `use_resource`.
+- `/reset` atomically replaces all state in a single line: `*lock_world(&state) = fresh_world;`
+- `build_demo_world()` is the **only** file that knows which concrete types are wired together — domain and application layers never import `World`.
+
+If the system later moves to per-aggregate locks, `World` is removed and each service gets its own `Arc<Mutex<...>>` — the change is localised entirely to `composition_root.rs` and `http.rs`.
+
+---
+
 **Q: Why is the HTTP feature gated behind `--features http`?**
 
 A: It keeps the core library (`lib.rs`) free of Axum, Tokio, tower-http, and utoipa dependencies. Projects that embed this crate as a library but provide their own transport (gRPC, CLI, message bus) don't pay the compile-time or binary-size cost of a web framework. The `serve.rs` binary only compiles with that feature enabled, enforcing the separation at the toolchain level.
@@ -527,6 +549,26 @@ A: It is a test fixture that avoids repeating the same construction in every tes
 
 ---
 
+**Q: AGENTS.md says `cargo nextest` is preferred over `cargo test`. What is the difference?**
+
+A: `cargo nextest` is a third-party test runner (`cargo-nextest`); `cargo test` is the built-in one.
+
+| | `cargo test` | `cargo nextest` |
+|---|---|---|
+| **Execution model** | Tests within one binary run in threads — shared process, shared static state | Each test runs as a **separate process** — true isolation, no state leaks between tests |
+| **Speed** | Single-threaded per binary | Runs all tests in parallel across processes; typically 2–3× faster on multi-core |
+| **Output** | All output interleaved; hard to read on failure | Clean per-test output, failures shown with full context, progress bar |
+| **Failure isolation** | A panic in one test can corrupt or hang others in the same binary | A panic kills only that test process; all others continue |
+| **Retry** | None built-in | `--retries N` for flaky tests |
+| **Filtering** | `cargo test foo` substring match | `-E 'test(foo)'` — full filter expression language |
+| **CI output** | No JUnit by default | `--profile ci` emits JUnit XML natively |
+
+**The one trade-off:** `cargo nextest` does not run `doctests` — those still need `cargo test --doc`. That is why AGENTS.md says "preferred" rather than "required."
+
+For this repo, `nextest` is preferred because test names include spec IDs (e.g., `ac_r1_s7_denied_emits_event`) and nextest's clean per-test output makes it immediately obvious which spec scenario failed without scrolling through interleaved output.
+
+---
+
 ## 12. Security & Input Validation
 
 Related files: [src/interface/dto.rs](../src/interface/dto.rs), [src/interface/http.rs](../src/interface/http.rs), [src/application/guards.rs](../src/application/guards.rs), [deny.toml](../deny.toml), [AGENTS.md](../AGENTS.md)
@@ -652,6 +694,27 @@ A: Advantages: machine-readable codes (`"PassengerNotFound"`) allow clients to b
 **Q: The API exposes an OpenAPI spec at `/openapi.json` via utoipa. What value does this provide?**
 
 A: It provides a machine-readable, self-documenting contract that clients can use to auto-generate HTTP client code (e.g., TypeScript SDK from `openapi-generator`), validate request/response shapes, and power interactive documentation (Swagger UI, Redoc). For a full-stack project it closes the contract loop: the Rust server owns the spec, and the frontend can be generated or validated against it rather than maintaining types manually. The current frontend writes its API types by hand (`api.ts`) — generating them from `/openapi.json` would be the next step.
+
+---
+
+**Q: `openapi.json` doesn't appear in the repository as a committed file. Is it missing?**
+
+A: No — it is a derived artifact, not source. `utoipa`'s `#[derive(OpenApi)]` on the empty `ApiDoc` struct compiles every `#[utoipa::path(...)]` annotation across all handlers into a static in-memory spec at build time. The `openapi_json` handler returns it on every `GET /openapi.json` request:
+
+```rust
+async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
+    Json(ApiDoc::openapi())   // generated method from the derive macro
+}
+```
+
+To inspect it while the server is running:
+
+```bash
+cargo run --features http --bin serve
+curl http://127.0.0.1:8080/openapi.json | jq
+```
+
+Committing a static copy would create a second source of truth that silently drifts whenever handler annotations change. If a CI pipeline needs a committed file for type generation (e.g., `openapi-typescript`), the idiomatic approach is a build script or `cargo xtask` that starts the server, fetches `/openapi.json`, and writes it as a CI artifact — not a manually maintained static file. Note also that `env!("CARGO_PKG_VERSION")` in the `info` block embeds the version from `Cargo.toml` at compile time, so the served spec is always version-accurate without manual updates.
 
 ---
 
@@ -937,6 +1000,31 @@ Each step is a separate job so failures are localised. Steps 1-5 map exactly to 
 
 Related files: [docs/plan-passengerResourceManagement.prompt.md](plan-passengerResourceManagement.prompt.md), [specs/](../specs), [src/application/crew_lead_service.rs](../src/application/crew_lead_service.rs), [src/application/access_service.rs](../src/application/access_service.rs)
 
+**Q: [TRADEOFF] What are the good and bad points of using Rust as a backend language?**
+
+A: **Good points:**
+
+- **Memory safety without GC** — no GC pauses, no null-pointer crashes, no data races; caught at compile time. `#![forbid(unsafe_code)]` in the domain layer makes this explicit.
+- **Performance** — comparable to C/C++; zero-cost abstractions mean the clean layering (ports, generics, trait objects) compiles down to efficient machine code.
+- **Compile-time thread-safety** — `Send`/`Sync` traits in `src/application/ports.rs` mean the compiler verifies that types are safe to share across threads. In this codebase a single `Arc<Mutex<World>>` serialises all HTTP handlers — not concurrent, but provably correct. The traits ensure that if you later move to fine-grained locking, every unsound sharing is a compile error rather than a race condition caught in production.
+- **Exhaustive pattern matching** — adding a new `DomainError` variant forces every `match` to handle it; no silent fallthrough. Maps directly to the "closed enum" spec rules (TP-R4, AU-R3).
+- **`Result<T, E>` instead of exceptions** — errors are explicit, typed, and traced to spec IDs. The compiler won't let you silently ignore one.
+- **Tiny binaries and fast startup** — no runtime VM; the whole server ships as a single binary, easy to containerise.
+- **`cargo` toolchain** — testing (`nextest`), linting (`clippy`), formatting (`rustfmt`), and coverage (`llvm-cov`) all in one tool, enforced in CI.
+
+**Bad points:**
+
+- **Steep learning curve** — ownership, borrowing, and lifetimes take weeks to internalise. The heavy inline comments throughout this codebase exist precisely because of this.
+- **Slow compile times** — especially with heavy crates like `axum` + `tokio`; monomorphisation generates a lot of specialised code.
+- **Verbose for simple tasks** — sharing mutable state across threads (trivial in Python/Go) requires explicit `Arc<Mutex<T>>` boilerplate (visible in `InMemoryAdminEventSink`).
+- **Smaller ecosystem** — fewer production-ready libraries than Node/Go/Java; ORMs, auth middleware, and observability tooling are less mature.
+- **Async complexity** — `async`/`await` with `tokio` adds another mental layer on top of ownership and lifetimes.
+- **Harder to hire for** — smaller talent pool than Go, Java, or TypeScript backend engineers.
+
+**For this project specifically:** Rust is a strong fit because the domain rules are pure logic with no I/O — exactly where Rust's type system (newtypes, exhaustive enums, `Result`) shines as a *correctness* tool, not just a performance one.
+
+---
+
 **Q: The spec fixes the crew lead count at exactly 3. What would you change if the product requirement changed to "at least 1, at most 10"?**
 
 A: Three changes:
@@ -973,6 +1061,128 @@ A: (This is intentionally open-ended — here is one strong answer.)
 1. **Authentication**: The `actor_id` is caller-supplied with no verification. Add a token-based auth layer (JWT or session cookie) at the interface boundary that maps a verified identity to an `Actor`. The domain layer stays unchanged.
 2. **Persistent storage**: In-memory state resets on restart. Add a database-backed repository (point above) with migrations, backups, and a tested recovery path.
 3. **Operational readiness**: Metrics endpoint, structured logs shipped to an aggregator, health check that tests the DB connection, graceful degradation plan. A system that can't be observed in production cannot be operated safely.
+
+---
+
+**Q: Walk me through exactly what IS implemented in this repository and what is NOT implemented if the goal is a production top-tier application.**
+
+A:
+
+**✅ Implemented**
+
+| Area | Detail |
+|------|--------|
+| **Domain model** | `Passenger`, `Resource`, `CrewLead`, `Tier` (Silver/Gold/Platinum), all as newtypes and enums. No primitives leaking through the layer boundary. |
+| **Tier access policy** | `can_access(passenger_tier, resource_min_tier)` via `rank()` comparison — all 9 tier-pair combinations spec-verified. |
+| **Passenger lifecycle** | Create, soft-delete, change tier — crew-lead-only, gated by `is_crew_lead()` guard. |
+| **Resource lifecycle** | Create, soft-delete, change `min_tier` — crew-lead-only. |
+| **Crew lead management** | Bootstrap with exactly 3 leads; `replace` (atomically swaps); `add` (always 409, spec CL-R2); `remove` (always 409, spec CL-R3). |
+| **Access checks** | `AccessService::use_resource` — validates passenger and resource exist, evaluates tier policy, emits `UsageEvent` (allowed OR denied). |
+| **Audit trail** | Every admin mutation (create/delete/tier-change/crew-lead-replace) emits an `AdminEvent` via `AdminEventSink`. Append-only, in-memory. |
+| **Usage event log** | Every access attempt stored in `InMemoryUsageEventSink`. Includes snapshot fields: `tier_at_attempt`, `min_tier_at_attempt` — correct even after future tier changes. |
+| **Reporting** | `aggregate_by_tier` (allowed/denied counts per tier), `top_resources` (top N by allowed count), `personal_history` (all events for one passenger). |
+| **HTTP adapter** | 21 Axum endpoints: full CRUD for passengers/resources, crew-lead management, access, audit, usage, reports, reset. Feature-gated (`--features http`). |
+| **OpenAPI spec** | Dynamically generated by `utoipa` at `/openapi.json`. Always in sync with handler annotations, version embedded from `Cargo.toml`. |
+| **CORS + request IDs** | `tower-http` layers: `CorsLayer` (configurable origin list or `Any`), `SetRequestIdLayer` + `PropagateRequestIdLayer` for `x-request-id` correlation. |
+| **Error mapping** | `DomainError` → HTTP status (400/403/404/409). Machine-readable `code` string in every error body. |
+| **Deterministic clock** | `FakeClock` (`AtomicI64`, `Ordering::Relaxed`) — injected as a port trait. Time-sensitive business logic is fully testable with no `std::time`. |
+| **Input validation** | `TryFrom` and `serde` at the interface boundary — unknown tiers, malformed IDs rejected before reaching services. |
+| **Test suite** | Unit tests (alongside source), integration tests (`tests/`), HTTP integration tests (`tests/http_*.rs`). Named after spec IDs. `cargo nextest` < 60 s. |
+| **Code coverage** | `cargo llvm-cov` configured; `coverage.json` artifact in repo. |
+| **Static analysis** | `clippy --all-targets --all-features -- -D warnings -W clippy::pedantic` enforced. `rustfmt` enforced. `cargo-deny` for supply chain. |
+| **React frontend** | Two-world UI: in-browser TypeScript implementation + live Rust HTTP panel. Branded ID types, same business rules, Vite proxy for dev. |
+| **AGENTS.md** | Machine-readable contributor contract; codifies architecture, testing, commit format, and naming conventions. |
+
+---
+
+**❌ Not Implemented (would be required for a production top-tier app)**
+
+| Area | Gap | Where it would go |
+|------|-----|-------------------|
+| **Authentication** | `actor_id` is caller-supplied — any client can impersonate any crew lead or passenger. | JWT/session middleware at `src/interface/http.rs`; the layer derives `Actor` from a verified token claim. |
+| **Authorisation token verification** | No signatures, no session store, no RBAC policy. | Auth middleware in interface layer; domain `Actor` is populated from verified identity, not the request body. |
+| **Persistent storage** | All state is in-memory; resets on restart. | `SqlitePassengerRepo`, `PostgresUsageEventSink`, etc. in `src/infrastructure/`. Port traits already exist; only the implementations and composition root change. |
+| **Database migrations** | No schema, no versioned migrations, no rollback strategy. | `sqlx`/`sea-orm` migrations in `migrations/`. |
+| **Pagination** | `GET /passengers`, `GET /resources`, `GET /usage` return unbounded lists. | Cursor-based or offset pagination query params; the usage event log grows forever and is highest risk. |
+| **Rate limiting** | No per-IP or per-actor throttling. | `tower-http` `RateLimitLayer` or an API gateway policy. |
+| **TLS / HTTPS** | The server binds plain HTTP on 127.0.0.1:8080. | Terminate TLS at a reverse proxy (nginx/Caddy) or add `rustls` + `axum-server-tls`. |
+| **Graceful shutdown** | `serve.rs` binds and loops; no signal handling for `SIGTERM`. | `tokio::signal::unix::signal` to drain in-flight requests before shutting down. |
+| **Structured logging** | `println!`/`eprintln!` only. No log levels, no trace IDs in log lines, no shipping to aggregator. | `tracing` + `tracing-subscriber` with JSON formatter; propagate `x-request-id` through spans. |
+| **Metrics** | No `/metrics` endpoint, no counters, no latency histograms. | `metrics` crate + Prometheus exporter; instrument access allowed/denied counts, error rates, handler latency. |
+| **Health check depth** | `GET /health` returns `"ok"` unconditionally. | Add a DB ping and dependency check; return structured JSON with subsystem status. |
+| **Concurrency** | Single `Arc<Mutex<World>>` serialises all handlers — correct but not concurrent. | Fine-grained locking per aggregate, or CQRS with an event bus, once throughput demands it. |
+| **Multi-instance / horizontal scaling** | Shared in-memory `World` cannot be split across processes. | Persistence layer with optimistic locking + event bus (e.g., PostgreSQL `LISTEN/NOTIFY`) for cross-instance coordination. |
+| **Optimistic concurrency control** | No `version` field; last-write-wins on concurrent tier updates. | `version` column on `passengers`/`resources`; `If-Match`/ETag headers; `409 Conflict` on stale writes. |
+| **Soft-delete querying** | `list()` silently omits deleted records; no API to inspect deleted history. | Add `GET /passengers?include_deleted=true`; expose `deleted_at` in list responses. |
+| **Frontend type generation** | `web/src/services/api.ts` hand-maintains types — drift risk on every Rust rename. | `openapi-typescript` or `orval` in CI generates types from `/openapi.json`; eliminates the manual sync. |
+| **Frontend error handling** | Unknown error codes fall through to a generic message. | Generate error code enum from OpenAPI; exhaustive TypeScript switch with explicit fallback. |
+| **Accessibility** | No `aria-label`s audited, no keyboard-only path verified, colour-only error signals. | axe / Playwright accessibility scans; WCAG 2.1 AA compliance pass. |
+| **Tamper-evident audit log** | In-memory `Vec<AdminEvent>` is append-only by convention only. | Hash-chain events on insert; persist to append-only table; anchor periodic checkpoints externally. |
+| **Secret management** | No secrets in-code today, but no vault/env-secret infrastructure defined. | 12-factor env vars with a secrets manager (AWS Secrets Manager, Vault) — never committed to the repo. |
+| **CI/CD pipeline** | No `.github/workflows/` or equivalent. `AGENTS.md` documents the commands but does not automate them. | GitHub Actions: `cargo fmt --check`, `clippy -D warnings`, `cargo nextest`, `llvm-cov`, `cargo-deny`, Docker build. |
+| **Container / deployment artifact** | No `Dockerfile`, no image build, no deployment manifest. | Multi-stage `Dockerfile` (builder + distroless final); Kubernetes manifest or `docker-compose` for local parity. |
+| **API versioning** | No versioning strategy; every field rename is a breaking change. | Path versioning (`/v1/...`) or media-type versioning; OpenAPI compatibility checks in CI. |
+| **Load / chaos testing** | No performance baseline, no fault-injection tests. | `k6` or `wrk` load test for throughput baseline; chaos tests for mutex-poisoning recovery path. |
+
+**Summary:** The repository is solid for levels 1–4 of the assignment scope — the domain model, business rules, audit trail, reporting, HTTP adapter, and React demo are all present and tested. The gaps above are the standard delta between a well-engineered demo and a production service. None of them require redesigning the domain or service layers; they are infrastructure, operations, and security concerns that the port-trait architecture was explicitly designed to absorb without touching business logic.
+
+---
+
+**Q: For each production gap above, how would you actually implement it?**
+
+A:
+
+**1. Authentication.** Add an Axum middleware (using `axum::middleware::from_fn`) that runs before every authenticated route. It reads the `Authorization: Bearer <token>` header, validates the JWT signature against a public key (using the `jsonwebtoken` crate), and extracts the `sub` claim as the actor's identity. A custom Axum extractor (e.g., `struct AuthenticatedActor(Actor)`) then derives the `Actor` from the verified claim and injects it into handler parameters — the request body no longer carries `actor_id` at all. The domain layer is untouched.
+
+**2. Authorisation token verification.** Pair authentication with a session or RBAC store. On login, issue a signed JWT containing the user's role (`crew_lead` or `passenger`) and ID. The middleware verifies the signature *and* checks the role claim before constructing `Actor::CrewLead(...)` or `Actor::Passenger(...)`. For short-lived tokens, add a `TokenBlacklist` port trait (Redis-backed in production) so tokens can be revoked without waiting for expiry. All of this lives in `src/infrastructure/auth/` and is wired in the composition root.
+
+**3. Persistent storage.** Add `sqlx` (async, compile-time query checking) and create concrete infrastructure structs: `PostgresPassengerRepo`, `PostgresResourceRepo`, `PostgresUsageEventSink`. Each implements the existing port traits defined in `src/application/ports.rs` — zero changes to services. `build_demo_world()` is updated to construct a `PgPool` from an env var and inject the database-backed repos instead of in-memory ones. Start with an append-only `usage_events` table; entity tables come next.
+
+**4. Database migrations.** Place numbered SQL files in `migrations/` (e.g., `0001_create_passengers.sql`) and run `sqlx migrate run` at startup inside `serve.rs` before the router is bound. `sqlx` maintains a `_sqlx_migrations` table to track applied migrations and never re-runs them. For rollbacks, add corresponding `down.sql` files. CI runs migrations against a test database container, ensuring every PR has a tested migration path before merge.
+
+**5. Pagination.** Add `limit: Option<u64>` and `cursor: Option<String>` query parameters to list endpoints via a shared `PaginationQuery` struct. The service layer `list(limit, after_id)` fetches at most `limit + 1` rows — if the extra row exists, there is a next page and its ID is returned as the next cursor. The response body gains a `next_cursor: Option<String>` field. Cursor-based pagination is stable under concurrent inserts (unlike offset-based, which skips rows when new items are added above the offset).
+
+**6. Rate limiting.** Add `tower_governor` (a `tower` middleware wrapping the `governor` crate) to the router with a per-IP `RateLimiter`. Configure burst and steady-state rates (e.g., 60 req/min per IP). For per-actor rate limiting on sensitive endpoints like `POST /access`, use the authenticated actor ID as the key after the auth middleware runs. Return `429 Too Many Requests` with a `Retry-After` header so well-behaved clients back off correctly.
+
+**7. TLS / HTTPS.** In production, terminate TLS at a reverse proxy (nginx or Caddy) — both handle certificate renewal via Let's Encrypt automatically. For embedded TLS, replace `tokio::net::TcpListener` in `serve.rs` with `axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key)` from the `axum-server` crate. Never store certificates in the repo; mount them via Kubernetes secrets or a secrets manager at deploy time. Enforce HSTS once TLS is active.
+
+**8. Graceful shutdown.** In `serve.rs`, use `axum::serve(...).with_graceful_shutdown(shutdown_signal())` where `shutdown_signal()` is an async function that awaits `tokio::signal::unix::signal(SignalKind::terminate())?.recv()` (SIGTERM) or `ctrl_c()` (SIGINT). This tells Axum to stop accepting new connections and wait for in-flight handlers to complete before the process exits. For Kubernetes, set `terminationGracePeriodSeconds` to at least the p99 handler latency + a small buffer.
+
+**9. Structured logging.** Replace `println!` with `tracing::info!` / `tracing::error!` macros. In `serve.rs`, initialise a `tracing_subscriber::fmt` subscriber with `json()` format so every log line is machine-parseable. Add a `TraceLayer` from `tower-http` to automatically emit spans for every request containing the method, path, status code, and latency. Propagate the `x-request-id` header into the span so every log line for a request shares the same trace ID. Ship logs to an aggregator (Datadog, Loki, CloudWatch) via a sidecar or environment-specific subscriber.
+
+**10. Metrics.** Add the `metrics` crate with a `metrics-exporter-prometheus` backend, initialised once in `serve.rs`. In each handler (or via a `tower` middleware), increment counters (`metrics::counter!("http_requests_total", "method" => method, "status" => status)`) and record histograms (`metrics::histogram!("http_request_duration_seconds", latency)`). For domain-specific metrics, increment `access_allowed_total` and `access_denied_total` inside `AccessService::use_resource`. Expose them at `GET /metrics` — but keep that endpoint off the public router (internal port or authenticated).
+
+**11. Health check depth.** Replace the static `"ok"` response with a `HealthResponse { status: "ok" | "degraded", checks: HashMap<String, CheckResult> }` JSON body. Each `CheckResult` records whether a dependency (database connection, audit sink, downstream service) is reachable and its latency. The overall `status` is `"degraded"` if any check fails. Kubernetes liveness probes check the HTTP status code (200 vs 503); readiness probes use the same endpoint to gate traffic until all dependencies are healthy.
+
+**12. Concurrency (fine-grained locking).** Replace the single `Arc<Mutex<World>>` with per-aggregate `Arc<Mutex<...>>` — one for `PassengerService`, one for `ResourceService`, one for `CrewLeadService`, one for `AccessService`. Handlers acquire only the lock(s) they need. Lock ordering must be documented and strictly followed (e.g., always acquire in alphabetical service order) to prevent deadlocks. Alternatively, move to an actor-model (using `tokio::sync::mpsc` channels): each service runs as a dedicated task that processes requests sequentially from a channel, eliminating locks entirely.
+
+**13. Multi-instance / horizontal scaling.** Move all mutable state to Postgres. Each HTTP server instance is stateless — it reads and writes through the database. Use PostgreSQL advisory locks or optimistic concurrency control (see below) to coordinate concurrent writes. For event fanout across instances (e.g., pushing real-time usage events to connected WebSocket clients), use PostgreSQL `LISTEN/NOTIFY` or a message broker (Redis Streams, Kafka). The Kubernetes `Deployment` then scales `replicas` freely.
+
+**14. Optimistic concurrency control.** Add a `version: i64` column to `passengers` and `resources`, defaulting to `0`, incremented on every update. Request DTOs for mutations include `expected_version: i64`. The `UPDATE` statement uses `WHERE id = $1 AND version = $2`; if it affects 0 rows, the row was modified by a concurrent request — return `409 Conflict`. Surface this on the HTTP layer with `If-Match: "<version>"` header; the client re-fetches and retries. The `Passenger` domain struct gains a `version` field; the port trait `PassengerRepo::update` accepts the expected version.
+
+**15. Soft-delete querying.** Add `include_deleted: Option<bool>` to the `GET /passengers` and `GET /resources` query structs. The port trait `list(include_deleted: bool)` passes the flag to the repository, which either filters `WHERE deleted_at IS NULL` or returns all rows. The response DTO already includes `deleted_at: Option<i64>` — it becomes non-null for deleted records. Add a dedicated `GET /passengers/{id}/history` endpoint that always returns the record regardless of deletion status, for audit reconciliation purposes.
+
+**16. Frontend type generation.** Add `openapi-typescript` (or `orval`) as a dev dependency in `web/package.json`. In `package.json` scripts, add `"codegen": "openapi-typescript http://127.0.0.1:8080/openapi.json -o src/generated/api.ts"`. In CI, start the Rust server in the background, run codegen, then assert no git diff — a type drift on any Rust field rename or enum addition breaks CI before any human notices. Delete the hand-maintained types in `api.ts` and re-export from the generated file.
+
+**17. Frontend error handling.** Generate the error code string enum from the OpenAPI spec (the `ErrorBody.code` field can be defined as an `enum` in the `utoipa` schema annotation). The TypeScript generated type becomes `code: "PassengerNotFound" | "AccessDenied" | ...`. Replace the `KNOWN_CODES` set and `toDomainError()` string-switch with a type-safe exhaustive switch over the generated union. Add an `isKnownError(code: string): code is KnownErrorCode` type guard for runtime validation of responses from older API versions.
+
+**18. Accessibility.** Audit every interactive element with `axe-core` (via `@axe-core/react` in development mode, which logs violations to the browser console). Fix in priority order: all `<input>` elements need `<label htmlFor>` or `aria-label`; all icon-only buttons need `aria-label`; the allowed/denied outcome must not rely on colour alone (add a text label or icon with accessible name). Run `npx playwright test --grep accessibility` using Playwright's built-in `checkA11y` from `axe-playwright` as a CI gate. Target WCAG 2.1 AA.
+
+**19. Tamper-evident audit log.** On every `AdminEvent` insert, compute `event_hash = SHA-256(previous_hash || canonical_json(event))` and store it alongside the event. The first event uses a known genesis hash (e.g., `SHA-256("genesis")`). A verification endpoint `GET /audit/verify` replays the hash chain and returns `{ valid: true, length: n }` or the first broken index. For stronger guarantees, periodically write the head hash to an external immutable store (S3 object with object lock, or a public blockchain anchor). This makes any deletion or insertion detectable.
+
+**20. Secret management.** Never pass secrets via environment variables in plain text in production. Use a secrets manager: in AWS, store credentials in Secrets Manager or Parameter Store and fetch them at startup using the `aws-config` + `aws-sdk-secretsmanager` crates. In Kubernetes, mount secrets as environment variables from `Secret` objects (never `ConfigMap`). Rotate secrets without redeployment by adding a background task that refreshes the database password from the vault on a schedule. The `deny.toml` already blocks yanked crates; extend it with a `cargo audit` step in CI to catch known CVEs.
+
+**21. CI/CD pipeline.** Create `.github/workflows/ci.yml` with jobs: `fmt` (`cargo fmt --check`), `clippy` (`cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic`), `test` (`cargo nextest run --all-features`), `coverage` (`cargo llvm-cov --lcov --output-path lcov.info` + Codecov upload), `deny` (`cargo deny check`), `audit` (`cargo audit`), and `docker-build`. Run all jobs in parallel except `docker-build` which depends on `test`. Add a `cd.yml` that triggers on tags matching `v*`, builds a multi-arch image, pushes to a container registry, and applies a Kubernetes manifest.
+
+**22. Container / deployment artifact.** Write a two-stage `Dockerfile`: stage 1 uses `rust:1.78-slim` with `cargo-chef` to cache dependency compilation, then compiles the release binary with `cargo build --release --features http`; stage 2 uses `gcr.io/distroless/cc-debian12` (no shell, no package manager) and copies only the binary. The resulting image is typically under 20 MB. Add a `docker-compose.yml` for local parity: `prms` service (the Rust binary), `postgres` service, and `web` service (Vite dev server), all on a shared network with env-var-based configuration.
+
+**23. API versioning.** Prefix all routes with `/v1/` from the start. In the `router_with` function, nest the existing routes under `.nest("/v1", v1_router())`. When a breaking change is needed, create `router_v2()` with the new shape and mount it at `/v2/`. The OpenAPI spec at `/openapi.json` serves the latest version by default; add `/v1/openapi.json` and `/v2/openapi.json` as separate endpoints. Add an OpenAPI compatibility check in CI (`oasdiff breaking old.json new.json`) that fails the build if a new commit introduces breaking changes to a currently-served version.
+
+**24. Load / chaos testing.** Write a `k6` script (`tests/load/access_flood.js`) that creates 10 passengers and 5 resources, then hammers `POST /access` at 500 RPS for 60 seconds, asserting p99 latency < 200 ms and error rate < 0.1%. Run it in CI on merge to `main` against a staging environment. For chaos testing, use `toxiproxy` to inject latency and connection drops on the database connection and assert the server returns `503` gracefully rather than hanging. Test mutex-poisoning recovery by intentionally panicking a handler in a canary test and asserting the next request receives a 500 (not a hang).
+
+---
+
+**Summary:** The repository is solid for levels 1–4 of the assignment scope — the domain model, business rules, audit trail, reporting, HTTP adapter, and React demo are all present and tested. The gaps above are the standard delta between a well-engineered demo and a production service. None of them require redesigning the domain or service layers; they are infrastructure, operations, and security concerns that the port-trait architecture was explicitly designed to absorb without touching business logic.
 
 ---
 
@@ -1075,6 +1285,21 @@ A: This project shows I can work across the stack while keeping boundaries clear
 
 Related files: [docs/plan-passengerResourceManagement.prompt.md](plan-passengerResourceManagement.prompt.md), [README.md](../README.md), [AGENTS.md](../AGENTS.md), [Cargo.toml](../Cargo.toml), [rust-toolchain.toml](../rust-toolchain.toml)
 
+**Q: If you want to add a new requirement to this project, what is the correct flow?**
+
+A: The flow follows AGENTS.md §9 — spec first, code last. AGENTS.md itself is **not** touched for individual features; it contains house rules about *how* to work, not *what* to build. The sequence is:
+
+1. **Update the plan** (`docs/plan-passengerResourceManagement.prompt.md`) — add the feature to the relevant level's deliverables and update the "Done" checklist so the intent is recorded before any code moves.
+2. **Write or update the spec** (`specs/XX-feature.md`) — define numbered rules (`R1`, `R2`…), invariants (`I1`…), and scenarios (`S1`, `S2`…). This becomes the single source of truth. No code is written until the spec is settled and reviewed.
+3. **Write failing tests** — in `tests/feature.rs` or a `#[cfg(test)]` block inline with the source, named after the scenario IDs (e.g., `fn feat_r1_s1_description`). They must be **red**: the implementation does not exist yet.
+4. **Write the minimum code to go green** — domain types first (if new types are needed), then service methods, then port/infrastructure changes if needed, then HTTP handlers and DTOs last. Stop as soon as the tests pass; resist the urge to over-engineer.
+5. **Refactor with tests green** — clean up duplication, add inline comments explaining non-obvious choices, ensure `clippy` and `rustfmt` pass.
+6. **Commit** — conventional commit scoped to the spec ID: `feat(feature): FR-R1 description`. One commit per spec ID where possible.
+
+AGENTS.md is only updated if the new requirement changes the **house rules** themselves — e.g., a new mandatory tool, a new architectural layer, or a new constraint on code style. Adding a domain feature like pagination, time-limited access, or an auth layer does not change AGENTS.md.
+
+---
+
 **Q: The prompt asks reviewers to judge the project as if written by an experienced engineer. What evidence in the repo supports that?**
 
 A: The strongest evidence is not one flashy feature; it is the consistency of engineering discipline across the repo. Business rules are written as specs first, tests are named with spec IDs, the architecture has clear dependency direction, domain code is pure, failures return `Result` instead of panicking, and optional adapters like HTTP and React are kept outside the core path. An experienced engineer also makes reviewer experience easy: the README has a short quickstart, the toolchain is pinned, and tests run without external services.
@@ -1084,6 +1309,43 @@ A: The strongest evidence is not one flashy feature; it is the consistency of en
 **Q: The plan says "SOLID principles" are part of the grading values. Which SOLID principles are easiest to defend in this codebase?**
 
 A: SRP and DIP are the easiest to defend. SRP appears in the service split: `PassengerService` handles passenger lifecycle, `ResourceService` handles resource lifecycle, `AccessService` handles access attempts, and `ReportingService` handles read-only analytics. DIP appears through application-layer port traits (`Clock`, `UsageEventSink`, `AdminEventSink`) that are implemented by infrastructure adapters. ISP is also visible because read and write event capabilities are separate (`UsageEventSource` vs `UsageEventSink`). OCP is partly supported by adding new adapters without changing existing services, but a new tier still requires editing exhaustive matches, which is intentional because the tier set is currently closed.
+
+---
+
+**Q: When coding with AI assistance, what should the human own and what can the AI do?**
+
+A: The split follows a simple rule: **humans own intent and judgment; AI owns speed and mechanical correctness**.
+
+**Human must own:**
+
+| Responsibility | Why |
+|---|---|
+| **Deciding what to build** | AI cannot read business context, stakeholder priorities, or product risk — it will happily generate the wrong feature perfectly. |
+| **Writing and approving the spec** | The spec encodes the rules. If the human skips this, the AI generates code against an implicit spec it invented, which drifts from reality. In this repo, specs live in `specs/` and rules are numbered (`R1`, `R2`). The human reads and signs off on them. |
+| **Reviewing all generated code** | AI code is statistically plausible, not provably correct. The human checks: does this match the spec? Are invariants preserved? Are there security holes? Could this panic or leak? |
+| **Making architectural decisions** | Which layer owns this logic? Do we need a new port trait or can we extend an existing one? These decisions compound — the human must set the direction. |
+| **Committing and signing off** | The human's name is on the commit. GPG-signing (as in this repo) makes that explicit. |
+
+**AI can accelerate:**
+
+| Task | How AI helps |
+|---|---|
+| **Boilerplate generation** | Given the spec scenario, AI writes the failing test skeleton — naming it correctly (`fn feat_r1_s1_...`), stubbing the assertions. Human fills in the exact values. |
+| **First-pass implementation** | AI writes the minimum code to pass the test. Human reviews for spec compliance, edge cases, and style. |
+| **Inline comments** | AI explains *why* code is written a certain way (e.g., the `AtomicI64` in `FakeClock`, the borrow-split in `use_resource`). Human verifies the explanation is accurate. |
+| **Boilerplate-heavy layers** | DTO `From` impls, `#[utoipa::path(...)]` annotations, HTTP handler wiring — these are mechanical given the domain types already exist. |
+| **Refactoring within green tests** | AI suggests cleaner patterns (e.g., `entry().or_default()` vs manual `contains_key` + `insert`). Human decides whether to accept. |
+| **Documentation** | AI drafts Q&A answers, glossary entries, README sections. Human edits for accuracy and tone. |
+| **Searching and explaining existing code** | AI reads the codebase and explains what a function does, where a type is used, or why a constraint exists. |
+
+**The failure modes to avoid:**
+
+- **Vibe-coding without reviewing**: accepting AI output without reading it. The AI does not understand the spec; only the human does.
+- **Skipping the spec step**: asking AI to "implement pagination" without first defining the rules. The AI will pick reasonable defaults that may be wrong for this system.
+- **Over-delegating architecture**: AI will suggest patterns (service locator, global state, `unwrap()` everywhere) that violate this repo's rules. The human must reject them and explain the constraint.
+- **Treating AI as infallible on security**: AI-generated auth code, input validation, and crypto are statistically derived from training data — they need explicit security review, not just functional testing.
+
+**In this repo specifically:** AGENTS.md is the AI's instruction contract — it tells the AI what conventions to follow. The human wrote AGENTS.md. Every spec, every architectural decision, every commit message convention in it came from human judgment. The AI uses those rules to generate consistent, rule-compliant code faster than typing it by hand.
 
 ---
 
