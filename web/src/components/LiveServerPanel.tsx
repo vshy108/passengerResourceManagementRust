@@ -110,7 +110,7 @@ export function LiveServerPanel(): JSX.Element {
   };
 
   return (
-    <section className="panel">
+    <section className="panel" data-testid="live-panel">
       <header>
         <h2>Live Rust server (HTTP)</h2>
       </header>
@@ -119,11 +119,11 @@ export function LiveServerPanel(): JSX.Element {
           <span className="muted">
             base: <code>{api.base}</code>
           </span>
-          <span className={`tag ${status === "online" ? "allowed" : "denied"}`}>
+          <span className={`tag ${status === "online" ? "allowed" : "denied"}`} data-testid="server-status">
             {status.toUpperCase()}
           </span>
-          <button onClick={() => void ping()}>Re-check</button>
-          <button onClick={() => void refresh()} disabled={status !== "online"}>
+          <button onClick={() => void ping()} data-testid="btn-recheck">Re-check</button>
+          <button onClick={() => void refresh()} disabled={status !== "online"} data-testid="btn-refresh">
             Refresh all
           </button>
           <button
@@ -148,7 +148,7 @@ export function LiveServerPanel(): JSX.Element {
         </div>
 
         {status === "offline" && (
-          <p className="muted">
+          <p className="muted" data-testid="offline-msg">
             Server unreachable. Start it with{" "}
             <code>cargo run --features http --bin serve</code> from the repo root.
           </p>
@@ -344,7 +344,7 @@ function PassengersSection({
   return (
     <>
       <h3>Passengers (POST/PATCH/DELETE /passengers)</h3>
-      <table>
+      <table data-testid="passengers-table">
         <thead>
           <tr>
             <th>id</th>
@@ -394,7 +394,7 @@ function PassengersSection({
             </option>
           ))}
         </select>
-        <button onClick={() => void create()} disabled={!id || !name}>
+        <button onClick={() => void create()} disabled={!id || !name} data-testid="btn-create-passenger">
           Create passenger
         </button>
       </div>
@@ -443,7 +443,7 @@ function ResourcesSection({
   return (
     <>
       <h3>Resources (POST/PATCH/DELETE /resources)</h3>
-      <table>
+      <table data-testid="resources-table">
         <thead>
           <tr>
             <th>id</th>
@@ -556,7 +556,7 @@ function AccessSection({
             </option>
           ))}
         </select>
-        <button onClick={() => void attempt()} disabled={!validPid || !validRid}>
+        <button onClick={() => void attempt()} disabled={!validPid || !validRid} data-testid="btn-attempt-access">
           Attempt access
         </button>
       </div>
