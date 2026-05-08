@@ -8,8 +8,8 @@ import {
   type ApiTierCount,
   type ApiTopResource,
   type ApiUsageEvent,
+  type Tier,
 } from "../services/api";
-import type { Tier } from "../domain/tier";
 import { TierTag } from "./TierTag";
 
 type Status = "idle" | "checking" | "online" | "offline";

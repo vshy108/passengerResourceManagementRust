@@ -4,12 +4,19 @@
 // unset, requests go to `/api/*` and are proxied by Vite (see
 // vite.config.ts) to the local serve binary at 127.0.0.1:8080. Set
 // `VITE_API_BASE` to point at a remote server.
-//
-// All methods return a tagged `Result<T>` mirroring the rest of the
-// demo so error handling is uniform between the in-process services
-// and live API calls.
 
-import type { Tier } from "../domain/tier";
+// All API types are derived from the auto-generated OpenAPI schema.
+// Re-run `npm run generate:types` to regenerate after changing the Rust DTOs.
+import type { components } from "./openapi.generated";
+
+export type ApiCrewLead    = components["schemas"]["CrewLeadDto"];
+export type ApiPassenger   = components["schemas"]["PassengerDto"];
+export type ApiResource    = components["schemas"]["ResourceDto"];
+export type ApiUsageEvent  = components["schemas"]["UsageEventDto"];
+export type ApiAdminEvent  = components["schemas"]["AdminEventDto"];
+export type ApiTierCount   = components["schemas"]["TierCountsDto"];
+export type ApiTopResource = components["schemas"]["TopResourceDto"];
+export type Tier           = components["schemas"]["TierDto"];
 
 export type DomainError = string;
 export type Result<T> = { ok: true; value: T } | { ok: false; error: DomainError };
@@ -45,57 +52,6 @@ function toDomainError(code: string | undefined): DomainError {
     return code as DomainError;
   }
   return "Unknown";
-}
-
-export interface ApiCrewLead {
-  id: string;
-  name: string;
-}
-
-export interface ApiPassenger {
-  id: string;
-  name: string;
-  tier: Tier;
-  deleted_at: number | null;
-}
-
-export interface ApiResource {
-  id: string;
-  name: string;
-  category: string;
-  min_tier: Tier;
-  deleted_at: number | null;
-}
-
-export interface ApiUsageEvent {
-  id: number;
-  passenger_id: string;
-  resource_id: string;
-  tier_at_attempt: Tier;
-  min_tier_at_attempt: Tier;
-  timestamp: number;
-  outcome: "Allowed" | "Denied";
-}
-
-export interface ApiAdminEvent {
-  id: number;
-  actor_id: string;
-  action: string;
-  target_kind: string;
-  target_id: string;
-  timestamp: number;
-  details: string | null;
-}
-
-export interface ApiTierCount {
-  tier: Tier;
-  allowed: number;
-  denied: number;
-}
-
-export interface ApiTopResource {
-  resource_id: string;
-  allowed_count: number;
 }
 
 interface ErrorBody {
