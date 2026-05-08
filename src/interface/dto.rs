@@ -190,7 +190,7 @@ pub struct UseResourceReq {
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct UsageEventDto {
-    pub id: u64,
+    pub id: String,
     pub passenger_id: String,
     pub resource_id: String,
     pub tier_at_attempt: TierDto,
@@ -217,7 +217,7 @@ impl From<Outcome> for OutcomeDto {
 impl From<&UsageEvent> for UsageEventDto {
     fn from(e: &UsageEvent) -> Self {
         Self {
-            id: e.id,
+            id: e.id.clone(),
             passenger_id: e.passenger_id.0.clone(),
             resource_id: e.resource_id.0.clone(),
             tier_at_attempt: e.tier_at_attempt.into(),
@@ -232,7 +232,7 @@ impl From<&UsageEvent> for UsageEventDto {
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct AdminEventDto {
-    pub id: u64,
+    pub id: String,
     pub actor_id: String,
     pub action: String,
     pub target_kind: String,
@@ -244,7 +244,7 @@ pub struct AdminEventDto {
 impl From<&AdminEvent> for AdminEventDto {
     fn from(e: &AdminEvent) -> Self {
         Self {
-            id: e.id,
+            id: e.id.clone(),
             actor_id: e.actor_id.0.clone(),
             action: admin_action_str(e.action).to_owned(),
             target_kind: target_kind_str(e.target_kind).to_owned(),

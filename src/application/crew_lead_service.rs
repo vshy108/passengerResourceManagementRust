@@ -1,5 +1,7 @@
 //! Crew Lead application service. See `specs/02-crew-lead.md` (CL).
 
+use uuid::Uuid;
+
 use crate::application::ports::{AdminEventSink, Clock};
 use crate::domain::admin_event::{AdminAction, AdminEvent, TargetKind};
 use crate::domain::crew_lead::{CrewLead, CrewLeadId};
@@ -21,14 +23,8 @@ pub struct CrewLeadService {
 // `struct` (no `pub`) = visible only inside this module — implementation
 // detail of the service.
 struct AuditCfg {
-    // `Box<dyn Trait>` is a *trait object* — heap-allocated, dynamic
-    // dispatch. We use it here (instead of a generic parameter on
-    // CrewLeadService) so the audit type doesn't pollute every signature
-    // for callers who don't care about audit. The cost is one virtual
-    // call per `now()` / `append()` — negligible at this granularity.
     clock: Box<dyn Clock>,
     sink: Box<dyn AdminEventSink>,
-    next_id: u64,
 }
 
 impl CrewLeadService {
@@ -131,7 +127,6 @@ impl CrewLeadService {
         let mut audit = AuditCfg {
             clock,
             sink,
-            next_id: 1,
         };
         // Use the first lead as the acting Crew Lead for the bootstrap
         // event; this is a synthetic but stable choice (AU-R2 only
@@ -141,7 +136,9 @@ impl CrewLeadService {
         // tuple struct.
         let target_id = actor_id.0.clone();
         let event = AdminEvent {
-            id: audit.next_id,
+            // FIX: was u64 counter (reset on restart); UUID v4 is stable
+            // once persisted.
+            id: Uuid::new_v4().to_string(),
             actor_id,
             action: AdminAction::CrewLeadBootstrapped,
             target_kind: TargetKind::CrewLead,
@@ -151,7 +148,6 @@ impl CrewLeadService {
             // printing. `{}` formats with Display, `{:?}` with Debug.
             details: Some(format!("count={}", svc.leads.len())),
         };
-        audit.next_id += 1;
         audit.sink.append(event);
         svc.audit = Some(audit);
         Ok(svc)
@@ -177,7 +173,7 @@ impl CrewLeadService {
         // letting us mutate the inner value without taking ownership.
         if let Some(audit) = self.audit.as_mut() {
             let event = AdminEvent {
-                id: audit.next_id,
+                id: Uuid::new_v4().to_string(),
                 actor_id: actor_id.clone(),
                 action: AdminAction::CrewLeadReplaced,
                 target_kind: TargetKind::CrewLead,
@@ -185,7 +181,6 @@ impl CrewLeadService {
                 timestamp: audit.clock.now(),
                 details: Some(format!("replaced={}", old_id.0)),
             };
-            audit.next_id += 1;
             audit.sink.append(event);
         }
         Ok(())

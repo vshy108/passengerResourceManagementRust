@@ -1,5 +1,7 @@
 //! Passenger application service. See `specs/03-passenger.md` (PS).
 
+use uuid::Uuid;
+
 use crate::application::guards::require_crew_lead;
 use crate::application::ports::{AdminEventSink, Clock};
 use crate::domain::actor::Actor;
@@ -21,7 +23,6 @@ pub struct PassengerService<C: Clock> {
     // Audit sink is generic via trait object — same trick as the
     // crew-lead service. `Option<...>` because audit is opt-in.
     audit: Option<Box<dyn AdminEventSink>>,
-    next_audit_id: u64,
 }
 
 impl<C: Clock> PassengerService<C> {
@@ -34,7 +35,6 @@ impl<C: Clock> PassengerService<C> {
             deleted: Vec::new(),
             clock,
             audit: None,
-            next_audit_id: 1,
         }
     }
 
@@ -188,7 +188,9 @@ impl<C: Clock> PassengerService<C> {
             return;
         };
         let event = AdminEvent {
-            id: self.next_audit_id,
+            // FIX: was u64 counter (reset on restart); UUID v4 is stable
+            // once persisted.
+            id: Uuid::new_v4().to_string(),
             actor_id: actor_id.clone(),
             action,
             target_kind: TargetKind::Passenger,
@@ -196,7 +198,6 @@ impl<C: Clock> PassengerService<C> {
             timestamp: self.clock.now(),
             details,
         };
-        self.next_audit_id += 1;
         sink.append(event);
     }
 }

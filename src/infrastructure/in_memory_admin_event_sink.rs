@@ -87,9 +87,7 @@ mod tests {
 
     fn sample_event() -> AdminEvent {
         AdminEvent {
-            id: 1,
-            // `"cl-1".into()` calls `String::from(&str)` (via `Into`).
-            // Type is inferred from the `CrewLeadId(String)` context.
+            id: "test-event-1".into(),
             actor_id: CrewLeadId("cl-1".into()),
             action: AdminAction::CrewLeadBootstrapped,
             target_kind: TargetKind::CrewLead,

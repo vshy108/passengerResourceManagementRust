@@ -1,5 +1,7 @@
 //! Resource application service. See `specs/04-resource.md` (RS).
 
+use uuid::Uuid;
+
 use crate::application::guards::require_crew_lead;
 use crate::application::ports::{AdminEventSink, Clock};
 use crate::domain::actor::Actor;
@@ -18,7 +20,6 @@ pub struct ResourceService<C: Clock> {
     deleted: Vec<Resource>,
     clock: C,
     audit: Option<Box<dyn AdminEventSink>>,
-    next_audit_id: u64,
 }
 
 impl<C: Clock> ResourceService<C> {
@@ -29,7 +30,6 @@ impl<C: Clock> ResourceService<C> {
             deleted: Vec::new(),
             clock,
             audit: None,
-            next_audit_id: 1,
         }
     }
 
@@ -165,7 +165,9 @@ impl<C: Clock> ResourceService<C> {
             return;
         };
         let event = AdminEvent {
-            id: self.next_audit_id,
+            // FIX: was u64 counter (reset on restart); UUID v4 is stable
+            // once persisted.
+            id: Uuid::new_v4().to_string(),
             actor_id: actor_id.clone(),
             action,
             target_kind: TargetKind::Resource,
@@ -173,7 +175,6 @@ impl<C: Clock> ResourceService<C> {
             timestamp: self.clock.now(),
             details,
         };
-        self.next_audit_id += 1;
         sink.append(event);
     }
 }

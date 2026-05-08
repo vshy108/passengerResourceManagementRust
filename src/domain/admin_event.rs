@@ -29,7 +29,8 @@ pub enum TargetKind {
 /// AU-R2 — append-only record of a successful admin mutation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminEvent {
-    pub id: u64,
+    /// UUID v4 assigned at emission — stable across restarts when persisted.
+    pub id: String,
     // Who performed the action. Only crew leads can mutate state, so the
     // actor type is fixed (no Actor enum needed here).
     pub actor_id: CrewLeadId,

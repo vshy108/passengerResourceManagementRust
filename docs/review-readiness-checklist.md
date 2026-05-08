@@ -40,7 +40,12 @@ This file records senior-review gaps found while preparing the project for code 
 - [x] Restrict CORS origins for non-local deployments.
   `PRMS_CORS_ORIGINS` already enforces an allow-list when set; added a
   `tracing::warn!` at startup when CORS is `Any` so operators are alerted.
-- [ ] Add stable event IDs across restarts (database sequence, UUID, or persisted counter).
+- [x] Add stable event IDs across restarts (database sequence, UUID, or persisted counter).
+  `uuid` crate (v4) added as a dependency. All `AdminEvent` and `UsageEvent` IDs
+  changed from `u64` counters (reset on restart) to `Uuid::new_v4().to_string()`.
+  DTOs updated: `id` is now `String` in both `AdminEventDto` and `UsageEventDto`.
+  Counter fields removed from `PassengerService`, `ResourceService`, `AccessService`,
+  and `AuditCfg` in `CrewLeadService`.
 
 ## Senior-Review Positioning
 

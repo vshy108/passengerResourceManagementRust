@@ -18,9 +18,8 @@ pub enum Outcome {
 // self-explanatory even after later upgrades/downgrades.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageEvent {
-    /// Monotonic event id assigned by the sink. `u64` because the event
-    /// volume is expected to exceed the number of passengers/resources.
-    pub id: u64,
+    /// UUID v4 assigned at emission — stable across restarts when persisted.
+    pub id: String,
     pub passenger_id: PassengerId,
     pub resource_id: ResourceId,
     /// Snapshot of the passenger's tier AT THE TIME of the attempt.

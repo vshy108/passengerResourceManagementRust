@@ -1,5 +1,7 @@
 //! Access service. See `specs/05-access.md` (AC).
 
+use uuid::Uuid;
+
 use crate::application::passenger_service::PassengerService;
 use crate::application::ports::{Clock, UsageEventSink};
 use crate::application::resource_service::ResourceService;
@@ -16,13 +18,8 @@ use crate::domain::usage_event::{Outcome, UsageEvent};
 // We could instead use `Box<dyn Clock>` (dynamic dispatch) but generics
 // were chosen for performance and to keep the API ergonomic in tests.
 pub struct AccessService<C: Clock, S: UsageEventSink> {
-    // Fields are PRIVATE by default. No `pub` keyword = only this module
-    // can read or write them — the rest of the world goes through
-    // methods. This is the only encapsulation Rust offers.
     clock: C,
     sink: S,
-    // Monotonic counter for event ids, never resets, never reused.
-    next_event_id: u64,
 }
 
 // `impl<C, S>` block adds methods. The bounds must be repeated here.
@@ -36,7 +33,6 @@ impl<C: Clock, S: UsageEventSink> AccessService<C, S> {
         Self {
             clock,
             sink,
-            next_event_id: 1,
         }
     }
 
@@ -55,11 +51,7 @@ impl<C: Clock, S: UsageEventSink> AccessService<C, S> {
     ///   subject or target is missing or soft-deleted (no event).
     /// - `AccessDenied` (AC-E2) when tier is insufficient (event still
     ///   emitted with `Outcome::Denied`).
-    // Extra generics `<PC, RC>` let the caller pass services that use
-    // *different* clock types than ours. In practice tests typically use
-    // the same FakeClock everywhere, but the API doesn't force that.
-    //
-    // `&mut self` because we bump `next_event_id` and append to the sink.
+    // `&mut self` because we append to the sink.
     pub fn use_resource<PC: Clock, RC: Clock>(
         &mut self,
         actor: &Actor,
@@ -99,7 +91,9 @@ impl<C: Clock, S: UsageEventSink> AccessService<C, S> {
         // AC-R4 / AC-R5 / AC-R7 — emit event before returning.
         let allowed = passenger.tier.can_access(resource.min_tier);
         let event = UsageEvent {
-            id: self.next_event_id,
+            // FIX: was a u64 counter that reset on restart; UUID v4 is
+            // stable across restarts once persisted.
+            id: Uuid::new_v4().to_string(),
             // `.clone()` is required for non-Copy fields — we keep our
             // borrowed reference but the event needs OWNED ids so it can
             // be moved into the sink and returned to the caller.
@@ -116,10 +110,6 @@ impl<C: Clock, S: UsageEventSink> AccessService<C, S> {
                 Outcome::Denied
             },
         };
-        self.next_event_id += 1;
-        // `.clone()` because `append` takes ownership of the event but we
-        // also want to return it to the caller below. Cheap-ish since
-        // UsageEvent only has String ids inside it.
         self.sink.append(event.clone());
 
         if allowed {
