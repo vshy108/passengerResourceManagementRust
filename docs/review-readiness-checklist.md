@@ -15,7 +15,9 @@ This file records senior-review gaps found while preparing the project for code 
 
 ## Code / Product Follow-Ups
 
-- [ ] Clarify whether passenger self-access must be enforced in the Rust service API or only by the HTTP shape.
+- [x] Clarify whether passenger self-access must be enforced in the Rust service API or only by the HTTP shape.
+  Self-access is enforced by design: `passenger_id` is derived from `Actor::Passenger`, not a separate parameter.
+  Documented in `specs/05-access.md`.
 - [ ] Generate TypeScript API types/client from `/openapi.json` to reduce contract drift.
 - [ ] Add a Playwright end-to-end flow through the React UI and live Rust API.
 - [ ] Decide whether to close the remaining coverage gap or keep the 98% line gate with documented rationale.

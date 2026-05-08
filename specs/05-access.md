@@ -14,6 +14,14 @@ denied).
 - A `UsageEventSink` (port) for emitting events.
 - A `Clock` (port) for timestamps.
 
+> **Self-access is enforced by design.** The service derives
+> `passenger_id` exclusively from the `Actor::Passenger` variant — there
+> is no separate `passenger_id` parameter. A passenger therefore can only
+> attempt access as themselves; impersonation is structurally impossible
+> at the service layer. At the HTTP boundary the `passenger_id` is still
+> caller-supplied (no real auth yet); this is a known limitation tracked
+> in `docs/review-readiness-checklist.md`.
+
 ## Outputs
 - `Result<UsageEvent, DomainError>` — `Ok` for allowed, `Err` for
   denied. The denial **still emits** a `UsageEvent` with
