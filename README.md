@@ -106,7 +106,7 @@ cargo run --features http --bin serve
 | `GET` | `/reports/personal-history/{id}` | Personal usage history for a passenger |
 | `POST` | `/reset` | Reset in-memory state — only registered when `PRMS_ENABLE_RESET=true` |
 
-State is in-process and resets on restart. Quick smoke test (requires `PRMS_API_KEYS` — see below):
+State resets on restart in demo mode (no `PRMS_DB_PATH`); set `PRMS_DB_PATH` for event and entity persistence. Quick smoke test (requires `PRMS_API_KEYS` — see below):
 
 ```bash
 curl http://127.0.0.1:8080/health
@@ -184,7 +184,7 @@ and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
 
 - Rust 2024, stable channel pinned in [`rust-toolchain.toml`](./rust-toolchain.toml)
 - `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
-- Coverage: `cargo llvm-cov nextest --features http --ignore-filename-regex 'src/bin/'`
+- Coverage: `cargo llvm-cov nextest --features http --ignore-filename-regex 'src/bin/|sqlite_event_store'`
   — 96%+ line coverage; CI fails below 96. The `serve`
   binary entrypoint and SQLite glue are excluded (they boot real I/O).
 - CI: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs fmt, clippy
@@ -211,11 +211,12 @@ so the type system catches mix-ups at compile time. Errors are a single
 `match` site whenever a variant is added.
 
 **Tradeoffs we made deliberately.**
-- **In-memory state only.** Passengers, resources, and crew leads are
-  service-owned in-memory collections; usage/admin events use in-memory
-  sinks behind small port traits. Adding a real DB is the next adapter
-  boundary, but we did not ship one because the brief did not ask for
-  durability. See `src/infrastructure/`.
+- **Persistence via SQLite (opt-in).** Passengers, resources, and crew leads are
+  service-owned in-memory collections restored from SQLite on startup when
+  `PRMS_DB_PATH` is set. Usage and admin events are written through to SQLite
+  immediately on every `append()`. Without `PRMS_DB_PATH` the server falls back
+  to a seeded in-memory demo world that resets on restart. See
+  `src/infrastructure/sqlite_event_store.rs` and `src/interface/composition_root.rs`.
 - **Token-based authentication.** Every request must carry
   `Authorization: Bearer <token>`. The server resolves the token to an
   `Actor` via `PRMS_API_KEYS` at startup — unknown tokens return 401.
@@ -235,7 +236,7 @@ so the type system catches mix-ups at compile time. Errors are a single
   drift from the wire format.
 - **Coverage gate at 96% lines** (`src/bin/serve.rs` and SQLite
   infrastructure excluded — they require real I/O). The remaining
-  uncovered lines are infra-only paths (mutex-poison 503, CORS
+  uncovered lines are infra-only paths (rwlock-poison 503, CORS
   `Any`-vs-list branching, governor rate-limit block) that cannot
   be hit without unsafe thread manipulation or production-only config.
 
