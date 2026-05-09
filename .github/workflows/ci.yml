@@ -44,7 +44,7 @@ jobs:
         run: |
           cargo llvm-cov nextest --features http \
             --ignore-filename-regex 'src/bin/|sqlite_event_store' \
-            --fail-under-lines 93
+            --fail-under-lines 96
 
   audit:
     runs-on: ubuntu-latest

@@ -182,8 +182,8 @@ and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
 - Rust 2024, stable channel pinned in [`rust-toolchain.toml`](./rust-toolchain.toml)
 - `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
 - Coverage: `cargo llvm-cov nextest --features http --ignore-filename-regex 'src/bin/'`
-  — 98%+ line coverage; CI fails below that threshold. The `serve`
-  binary entrypoint is excluded (it boots a real socket).
+  — 96%+ line coverage; CI fails below 96. The `serve`
+  binary entrypoint and SQLite glue are excluded (they boot real I/O).
 - CI: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs fmt, clippy
   (default + `--features http`), nextest (default + `--features http`), and
   the web build on every push and PR.
@@ -230,9 +230,11 @@ so the type system catches mix-ups at compile time. Errors are a single
 - **OpenAPI is generated, not handwritten.** `utoipa` derives the
   schema from the same DTOs the handlers use, so the spec cannot
   drift from the wire format.
-- **Coverage gate at 98% lines** (`src/bin/serve.rs` excluded — it
-  binds a real socket). Higher gates encouraged us to delete dead
-  code rather than write tests for unreachable branches.
+- **Coverage gate at 96% lines** (`src/bin/serve.rs` and SQLite
+  infrastructure excluded — they require real I/O). The remaining
+  uncovered lines are infra-only paths (mutex-poison 503, CORS
+  `Any`-vs-list branching, governor rate-limit block) that cannot
+  be hit without unsafe thread manipulation or production-only config.
 
 **Assumptions.**
 - A passenger keeps the same tier between the moment of access and
@@ -259,13 +261,18 @@ The HTTP server is a demo affordance, not a production target:
 
 - State is held in a single mutex around `World` — fine for the demo, will not
   scale beyond a handful of concurrent writers.
-- `POST /reset` is gated by `PRMS_ENABLE_RESET=true` and "must be a
-  known crew lead" — intended for local demo / test use only.
+- `POST /reset` is gated by `PRMS_ENABLE_RESET=true` — intended for local
+  demo / test use only.
 - CORS defaults to `Any` for dev convenience; set `PRMS_CORS_ORIGINS`
   before exposing the server beyond localhost.
-- There is no durable storage, pagination, or stable event-ID sequence
-  across restarts yet. Those are documented follow-ups in
-  [`docs/review-readiness-checklist.md`](./docs/review-readiness-checklist.md).
+- Entity state (passengers, resources, crew leads) is in-memory and rebuilt
+  from the demo seed on every restart unless `PRMS_DB_PATH` is set (SQLite).
+  Event sinks (`usage_events`, `admin_events`) persist to SQLite when
+  `PRMS_DB_PATH` is set.
+- Bearer tokens are resolved from `PRMS_API_KEYS` at startup; a real
+  deployment would back this with a secrets manager and short-lived tokens.
+- No TLS — run behind a reverse proxy (nginx, Caddy) that terminates TLS.
+- Rate limiting uses fixed defaults; thresholds are not configurable via env.
 
 ## AI Usage Disclosure
 
