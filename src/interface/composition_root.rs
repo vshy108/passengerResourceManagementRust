@@ -122,10 +122,27 @@ impl World {
     #[cfg(feature = "http")]
     pub fn flush_to_db(&self) {
         if let Some(store) = &self.entity_store {
-            store.sync_crew_leads(self.crew_leads.list());
-            store.sync_passengers(self.passengers.list(), self.passengers.deleted());
-            store.sync_resources(self.resources.list(), self.resources.deleted());
+            // FIX: use sync_all() so all three entity tables are replaced inside
+            // a single BEGIN IMMEDIATE / COMMIT transaction. Previously three
+            // separate DELETE+INSERT calls meant a crash between any two left
+            // the DB in a split-brain state (e.g. crew leads updated but
+            // passengers still showing old state).
+            store.sync_all(
+                self.crew_leads.list(),
+                self.passengers.list(),
+                self.passengers.deleted(),
+                self.resources.list(),
+                self.resources.deleted(),
+            );
         }
+    }
+
+    /// Returns `Some(true/false)` if a `SQLite` entity store is configured,
+    /// `None` if in-memory only. Used by `GET /health/ready` for DB liveness.
+    #[cfg(feature = "http")]
+    #[must_use]
+    pub fn ping_db(&self) -> Option<bool> {
+        self.entity_store.as_ref().map(|s| s.ping_db())
     }
 }
 

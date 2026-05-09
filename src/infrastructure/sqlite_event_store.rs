@@ -125,7 +125,16 @@ fn kind_from_str(s: &str) -> rusqlite::Result<TargetKind> {
 /// `rusqlite::Error` if the file cannot be opened or the DDL fails.
 pub fn open_db(path: &str) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
-    conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+    // FIX: busy_timeout prevents immediate SQLITE_BUSY errors when two connections
+    // write concurrently (e.g. event sink + entity flush on startup). 5 s retry
+    // window is more than enough for any in-process contention window.
+    // synchronous=NORMAL is safe with WAL mode: it guarantees durability on
+    // crash without the full fsync overhead of synchronous=FULL.
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA busy_timeout=5000;
+         PRAGMA synchronous=NORMAL;",
+    )?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS usage_events (
             id                  TEXT PRIMARY KEY NOT NULL,
@@ -573,6 +582,83 @@ impl SqliteEntityStore {
             )
             .expect("sqlite resources INSERT failed");
         }
+    }
+
+    /// Atomically replace all three entity tables inside a single
+    /// `BEGIN IMMEDIATE` / `COMMIT` transaction.
+    ///
+    /// `sync_crew_leads`, `sync_passengers`, and `sync_resources` each open
+    /// their own implicit transaction. A process crash between two of those
+    /// calls leaves the DB in a split-brain state. This method wraps all
+    /// three in one explicit transaction so the update is all-or-nothing.
+    ///
+    /// # Panics
+    /// If the inner mutex is poisoned or any write fails (a divergence between
+    /// in-memory and persistent state is unrecoverable, so crashing is correct).
+    pub fn sync_all(
+        &self,
+        leads: &[crate::domain::crew_lead::CrewLead],
+        active_pax: &[crate::domain::passenger::Passenger],
+        deleted_pax: &[crate::domain::passenger::Passenger],
+        active_res: &[crate::domain::resource::Resource],
+        deleted_res: &[crate::domain::resource::Resource],
+    ) {
+        let conn = self.conn.lock().expect("entity store conn mutex poisoned");
+        // FIX: BEGIN IMMEDIATE acquires a write lock upfront, preventing
+        // "database is locked" (SQLITE_BUSY) errors mid-transaction when
+        // another connection holds a read lock.
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .expect("sqlite BEGIN IMMEDIATE failed");
+
+        // Crew leads
+        conn.execute_batch("DELETE FROM crew_leads")
+            .expect("sqlite crew_leads DELETE failed");
+        for lead in leads {
+            conn.execute(
+                "INSERT INTO crew_leads (id, name) VALUES (?1, ?2)",
+                params![lead.id.0, lead.name],
+            )
+            .expect("sqlite crew_leads INSERT failed");
+        }
+
+        // Passengers (active + deleted in one pass)
+        conn.execute_batch("DELETE FROM passengers")
+            .expect("sqlite passengers DELETE failed");
+        for p in active_pax.iter().chain(deleted_pax.iter()) {
+            conn.execute(
+                "INSERT INTO passengers (id, name, tier, deleted_at) VALUES (?1, ?2, ?3, ?4)",
+                params![p.id.0, p.name, tier_to_str(p.tier), p.deleted_at.map(|t| t.0)],
+            )
+            .expect("sqlite passengers INSERT failed");
+        }
+
+        // Resources (active + deleted in one pass)
+        conn.execute_batch("DELETE FROM resources")
+            .expect("sqlite resources DELETE failed");
+        for r in active_res.iter().chain(deleted_res.iter()) {
+            conn.execute(
+                "INSERT INTO resources (id, name, category, min_tier, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![r.id.0, r.name, r.category, tier_to_str(r.min_tier), r.deleted_at.map(|t| t.0)],
+            )
+            .expect("sqlite resources INSERT failed");
+        }
+
+        conn.execute_batch("COMMIT")
+            .expect("sqlite COMMIT failed");
+    }
+
+    /// Verify database connectivity with a trivial query.
+    /// Returns `true` if the database is reachable, `false` otherwise.
+    ///
+    /// Used by `GET /health/ready` to surface database failures to the
+    /// k8s readiness probe before they affect real requests.
+    ///
+    /// # Panics
+    /// If the inner mutex is poisoned.
+    #[must_use]
+    pub fn ping_db(&self) -> bool {
+        let conn = self.conn.lock().expect("entity store conn mutex poisoned");
+        conn.query_row("SELECT 1", [], |_| Ok(())).is_ok()
     }
 }
 
