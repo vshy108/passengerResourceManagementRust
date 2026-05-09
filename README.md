@@ -136,6 +136,9 @@ All flags also read from the matching environment variable:
 | `--enable-reset`        | `PRMS_ENABLE_RESET`        | `false`            | Register the `/reset` route (local dev only)         |
 | `--shutdown-grace-secs` | `PRMS_SHUTDOWN_GRACE_SECS` | `10`               | Max seconds to drain in-flight requests after SIGINT |
 | `--api-keys`            | `PRMS_API_KEYS`            | _unset_ (all 401)  | Comma-separated `token:actor-id` pairs, e.g. `tok1:cl-aria,tok2:ps-001` |
+| `--rate-limit-rps`      | `PRMS_RATE_LIMIT_RPS`      | `10`               | Per-IP token replenish rate (req/s). Set lower for stricter throttling. |
+| `--rate-limit-burst`    | `PRMS_RATE_LIMIT_BURST`    | `50`               | Per-IP initial token burst before throttling begins. |
+| `--log-format`          | `PRMS_LOG_FORMAT`          | `text`             | `text` (human) or `json` (newline-delimited JSON for Loki/Datadog/CloudWatch). |
 | `RUST_LOG`              | _(env only)_               | `info`             | tracing-subscriber filter                            |
 
 Every response carries an `x-request-id` header (UUID-v4 if the client
@@ -255,24 +258,39 @@ so the type system catches mix-ups at compile time. Errors are a single
 - A single-process deployment is acceptable for the demo; horizontal
   scaling (shared state, leader election) is out of scope.
 
+## Deployment
+
+A production-ready deployment stack lives in the repository root:
+
+- **`Dockerfile`** — multi-stage build (`rust:1-bookworm` → `debian:bookworm-slim`),
+  runs as non-root uid 10001.
+- **`docker-compose.yml`** — wires PRMS + Caddy. The PRMS container is bound to
+  `127.0.0.1` inside the Docker network; Caddy is the sole external entry point.
+- **`Caddyfile`** — Caddy reverse-proxy with automatic Let's Encrypt TLS.
+  Set `PRMS_DOMAIN=your.domain` and Caddy handles certificate acquisition and renewal.
+
+```bash
+PRMS_DOMAIN=prms.example.com \
+PRMS_API_KEYS="prod-token:cl-aria" \
+docker compose up -d
+```
+
+Entity state and event logs persist via `PRMS_DB_PATH=/data/prms.db` (uncomment
+the volume in `docker-compose.yml`).
+
 ## Limitations
 
-The HTTP server is a demo affordance, not a production target:
+The demo mode (no `PRMS_DB_PATH`) holds entity state in-memory and resets on restart.
+In production-mode (`PRMS_DB_PATH` set), events persist to SQLite but entity state
+(passengers, resources, crew leads) is still rebuilt from the database on restart.
 
-- State is held in a single mutex around `World` — fine for the demo, will not
-  scale beyond a handful of concurrent writers.
-- `POST /reset` is gated by `PRMS_ENABLE_RESET=true` — intended for local
-  demo / test use only.
-- CORS defaults to `Any` for dev convenience; set `PRMS_CORS_ORIGINS`
-  before exposing the server beyond localhost.
-- Entity state (passengers, resources, crew leads) is in-memory and rebuilt
-  from the demo seed on every restart unless `PRMS_DB_PATH` is set (SQLite).
-  Event sinks (`usage_events`, `admin_events`) persist to SQLite when
-  `PRMS_DB_PATH` is set.
-- Bearer tokens are resolved from `PRMS_API_KEYS` at startup; a real
-  deployment would back this with a secrets manager and short-lived tokens.
-- No TLS — run behind a reverse proxy (nginx, Caddy) that terminates TLS.
-- Rate limiting uses fixed defaults; thresholds are not configurable via env.
+Other known constraints:
+
+- State is held in a single mutex around `World` — will not scale beyond a handful of
+  concurrent writers without sharding or an external database.
+- `POST /reset` is gated by `PRMS_ENABLE_RESET=true` — never enable in production.
+- Bearer tokens are resolved from `PRMS_API_KEYS` at startup; a real deployment would
+  back this with a secrets manager and short-lived tokens.
 
 ## AI Usage Disclosure
 

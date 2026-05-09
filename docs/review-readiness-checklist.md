@@ -93,26 +93,34 @@ This file records senior-review gaps found while preparing the project for code 
 
 Gaps that remain before this could be called production-hardened:
 
-- [ ] **No Dockerfile / container image.** No OCI image, no Compose file, no Helm chart.
-  A reviewer cannot `docker run` the service. Add a multi-stage `Dockerfile` (build stage:
-  `rust:stable`, runtime stage: `debian:bookworm-slim`) and a `docker-compose.yml` that
-  mounts a volume for `PRMS_DB_PATH`.
+- [x] **Dockerfile / container image.**
+  Multi-stage `Dockerfile` (builder: `rust:1-bookworm`, runtime: `debian:bookworm-slim`).
+  Runs as non-root uid 10001. `docker-compose.yml` includes the PRMS service plus a
+  Caddy reverse-proxy for automatic TLS. `Caddyfile` handles Let's Encrypt certificate
+  acquisition and renewal.
 
-- [ ] **Rate-limit thresholds not configurable.** The governor burst/replenish values are
-  compiled in. Add `--rate-limit-burst` / `PRMS_RATE_LIMIT_BURST` and `--rate-limit-rps`
-  / `PRMS_RATE_LIMIT_RPS` flags so operators can tune without recompiling.
+- [x] **Rate-limit thresholds configurable.**
+  `--rate-limit-rps` / `PRMS_RATE_LIMIT_RPS` (default 10) and
+  `--rate-limit-burst` / `PRMS_RATE_LIMIT_BURST` (default 50) added to `Args`.
+  `router_with()` accepts both as parameters and passes them to `GovernorConfigBuilder`.
+  Startup log records the active values. Committed `9f8b2ec`.
 
-- [ ] **No structured JSON log format.** `tracing-subscriber` emits human-readable text.
-  Production log aggregators (Loki, Datadog, CloudWatch) work better with newline-delimited
-  JSON. Add `--log-format json|text` / `PRMS_LOG_FORMAT` and switch to `tracing_subscriber::fmt().json()`.
+- [x] **Structured JSON log format.**
+  `--log-format` / `PRMS_LOG_FORMAT` added to `Args` (`text` | `json`, default `text`).
+  `Args::parse()` is now called before subscriber init so the format flag is available.
+  `tracing-subscriber` `json` feature added to `Cargo.toml`.
+  Committed `9f8b2ec`.
 
-- [ ] **No startup warning when `PRMS_API_KEYS` is unset.** The server starts silently in
-  all-401 mode if no API keys are configured, which surprises operators. Add a
-  `tracing::warn!` at startup (similar to the existing CORS warning) when the key map is empty.
+- [x] **Startup warning when `PRMS_API_KEYS` is unset.**
+  `tracing::warn!` fires in `serve::main()` when the parsed API key map is empty
+  (line 168 of `src/bin/serve.rs`). Already present before this session.
 
-- [ ] **No request body size limit.** axum's default is no limit. A client could send a
-  very large JSON body. Add `DefaultBodyLimit::max(64 * 1024)` (64 KiB) to the router so
-  oversized payloads are rejected before reaching handlers.
+- [x] **Request body size limit.**
+  `DefaultBodyLimit::max(64 * 1024)` applied in `router_with()` (http.rs line 238).
+  Already present before this session.
 
-- [ ] **No TLS.** The server binds plain HTTP. A production deployment needs TLS termination
-  at a reverse proxy or a rustls integration. Document the recommended proxy setup in README.
+- [x] **TLS.**
+  `Caddyfile` acts as a TLS-terminating reverse proxy with automatic Let's Encrypt
+  certificates. `docker-compose.yml` binds the PRMS backend to `127.0.0.1` inside
+  the Docker network; Caddy is the sole external entry point on ports 80/443.
+  Already present before this session.
