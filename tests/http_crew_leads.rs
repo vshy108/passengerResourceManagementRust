@@ -109,6 +109,25 @@ async fn list_crew_leads_pagination_offset_and_limit() {
 }
 
 #[tokio::test]
+async fn replace_crew_lead_empty_new_id_returns_400() {
+    let app = app();
+    // FIX: `CrewLeadDto::validate()` rejects an empty `id`.
+    // This exercises the `id.is_empty()` return branch (dto.rs line 81).
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::PUT,
+            "/crew-leads/cl-aria",
+            CL_TOKEN,
+            Some(json!({"new_lead": {"id": "", "name": "Valid"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
 async fn replace_crew_lead_empty_new_name_returns_400() {
     let app = app();
     // FIX: `CrewLeadDto::validate()` rejects an empty `name`.

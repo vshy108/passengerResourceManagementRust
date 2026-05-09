@@ -209,6 +209,45 @@ async fn create_passenger_empty_id_returns_400() {
 }
 
 #[tokio::test]
+async fn create_passenger_oversized_id_returns_400() {
+    let app = app();
+    // FIX: `CreatePassengerReq::validate()` rejects id longer than 255 chars.
+    // This exercises the `id.len() > 255` return branch (dto.rs line 168).
+    let long_id = "p".repeat(256);
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/passengers",
+            CL_TOKEN,
+            Some(json!({"id": long_id, "name": "Valid Name", "tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
+async fn create_passenger_empty_name_returns_400() {
+    let app = app();
+    // FIX: `CreatePassengerReq::validate()` rejects an empty name.
+    // This exercises the `name.is_empty()` return branch (dto.rs line 171).
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/passengers",
+            CL_TOKEN,
+            Some(json!({"id": "ps-noname", "name": "", "tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
 async fn create_passenger_oversized_name_returns_400() {
     let app = app();
     // Name > 255 chars should be rejected at the interface boundary.

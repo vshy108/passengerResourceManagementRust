@@ -168,6 +168,64 @@ async fn list_resources_pagination_offset_and_limit() {
 }
 
 #[tokio::test]
+async fn create_resource_empty_id_returns_400() {
+    let app = app();
+    // FIX: `CreateResourceReq::validate()` rejects an empty `id`.
+    // This exercises the `id.is_empty()` return branch (dto.rs line 224).
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/resources",
+            CL_TOKEN,
+            Some(json!({"id": "", "name": "Valid", "category": "lounge", "min_tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
+async fn create_resource_oversized_id_returns_400() {
+    let app = app();
+    // FIX: `CreateResourceReq::validate()` rejects id longer than 255 chars.
+    // This exercises the `id.len() > 255` return branch (dto.rs line 227).
+    let long_id = "r".repeat(256);
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/resources",
+            CL_TOKEN,
+            Some(json!({"id": long_id, "name": "Valid", "category": "lounge", "min_tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
+async fn create_resource_empty_name_returns_400() {
+    let app = app();
+    // FIX: `CreateResourceReq::validate()` rejects an empty name.
+    // This exercises the `name.is_empty()` return branch (dto.rs line 230).
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/resources",
+            CL_TOKEN,
+            Some(json!({"id": "res-noname", "name": "", "category": "lounge", "min_tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
 async fn create_resource_empty_category_returns_400() {
     let app = app();
     // FIX: `CreateResourceReq::validate()` rejects empty category.
