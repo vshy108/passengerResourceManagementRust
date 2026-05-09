@@ -59,12 +59,23 @@ interface ErrorBody {
   code: string;
 }
 
+/**
+ * Bearer token sent with every mutating request.
+ * Set via `api.setToken(token)` before calling any mutating endpoint.
+ * Defaults to the demo crew-lead token when VITE_API_TOKEN is set.
+ */
+let _token: string | null =
+  (import.meta.env.VITE_API_TOKEN as string | undefined) ?? null;
+
 async function call<T>(path: string, init?: RequestInit): Promise<Result<T>> {
   try {
     const res = await fetch(`${getBase()}${path}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",
+        // FIX: actor identity derived from bearer token, never from request body.
+        // Include the header only when a token is configured.
+        ...(_token ? { Authorization: `Bearer ${_token}` } : {}),
         ...(init?.headers ?? {}),
       },
     });
@@ -85,6 +96,16 @@ async function call<T>(path: string, init?: RequestInit): Promise<Result<T>> {
 export const api = {
   get base(): string {
     return getBase();
+  },
+
+  /** Configure the bearer token sent with every mutating request. */
+  setToken(token: string | null): void {
+    _token = token;
+  },
+
+  /** Return the currently configured bearer token (null if unset). */
+  getToken(): string | null {
+    return _token;
   },
 
   health: (): Promise<Result<string>> =>
@@ -114,10 +135,9 @@ export const api = {
   accessibleFor: (tier: Tier) =>
     call<ApiResource[]>(`/resources/accessible?tier=${tier}`),
 
-  reset: (actorId: string): Promise<Result<void>> =>
+  reset: (): Promise<Result<void>> =>
     call<void>("/reset", {
       method: "POST",
-      body: JSON.stringify({ actor_id: actorId }),
     }),
 
   addCrewLead: (lead: ApiCrewLead): Promise<Result<void>> =>
@@ -126,60 +146,53 @@ export const api = {
       body: JSON.stringify({ lead }),
     }),
 
-  removeCrewLead: (actorId: string, id: string): Promise<Result<void>> =>
+  removeCrewLead: (id: string): Promise<Result<void>> =>
     call<void>(`/crew-leads/${encodeURIComponent(id)}`, {
       method: "DELETE",
-      body: JSON.stringify({ actor_id: actorId }),
     }),
 
   replaceCrewLead: (
-    actorId: string,
     oldId: string,
     newLead: ApiCrewLead,
   ): Promise<Result<void>> =>
     call<void>(`/crew-leads/${encodeURIComponent(oldId)}`, {
       method: "PUT",
-      body: JSON.stringify({ actor_id: actorId, new_lead: newLead }),
+      body: JSON.stringify({ new_lead: newLead }),
     }),
 
-  useResource: (passengerId: string, resourceId: string) =>
+  useResource: (resourceId: string) =>
     call<ApiUsageEvent>("/access", {
       method: "POST",
       body: JSON.stringify({
-        passenger_id: passengerId,
         resource_id: resourceId,
       }),
     }),
 
   createPassenger: (
-    actorId: string,
     id: string,
     name: string,
     tier: Tier,
   ): Promise<Result<ApiPassenger>> =>
     call<ApiPassenger>("/passengers", {
       method: "POST",
-      body: JSON.stringify({ actor_id: actorId, id, name, tier }),
+      body: JSON.stringify({ id, name, tier }),
     }),
 
   changePassengerTier: (
-    actorId: string,
     id: string,
     tier: Tier,
   ): Promise<Result<void>> =>
     call<void>(`/passengers/${encodeURIComponent(id)}/tier`, {
       method: "PATCH",
-      body: JSON.stringify({ actor_id: actorId, tier }),
+      body: JSON.stringify({ tier }),
     }),
 
-  softDeletePassenger: (actorId: string, id: string): Promise<Result<void>> =>
+  softDeletePassenger: (id: string): Promise<Result<void>> =>
     call<void>(`/passengers/${encodeURIComponent(id)}`, {
       method: "DELETE",
-      body: JSON.stringify({ actor_id: actorId }),
     }),
 
   createResource: (
-    actorId: string,
     id: string,
     name: string,
     category: string,
@@ -188,7 +201,6 @@ export const api = {
     call<ApiResource>("/resources", {
       method: "POST",
       body: JSON.stringify({
-        actor_id: actorId,
         id,
         name,
         category,
@@ -197,18 +209,16 @@ export const api = {
     }),
 
   changeResourceMinTier: (
-    actorId: string,
     id: string,
     tier: Tier,
   ): Promise<Result<void>> =>
     call<void>(`/resources/${encodeURIComponent(id)}/min-tier`, {
       method: "PATCH",
-      body: JSON.stringify({ actor_id: actorId, tier }),
+      body: JSON.stringify({ tier }),
     }),
 
-  softDeleteResource: (actorId: string, id: string): Promise<Result<void>> =>
+  softDeleteResource: (id: string): Promise<Result<void>> =>
     call<void>(`/resources/${encodeURIComponent(id)}`, {
       method: "DELETE",
-      body: JSON.stringify({ actor_id: actorId }),
     }),
 };

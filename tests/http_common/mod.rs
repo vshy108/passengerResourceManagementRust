@@ -21,9 +21,10 @@
 #![cfg(feature = "http")]
 #![allow(dead_code)] // each test binary uses a subset of these helpers.
 
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
-use axum::{
+use axum::
+{
     Router,
     body::Body,
     http::{Method, Request, StatusCode},
@@ -40,17 +41,26 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use passenger_resource_management::interface::composition_root::build_demo_world;
-use passenger_resource_management::interface::http::{router_with, CorsOrigins};
+use passenger_resource_management::interface::http::{AppState, router_with, CorsOrigins};
 
 // `pub const` — a compile-time constant, inlined at every use site.
 // Convention: SCREAMING_SNAKE_CASE.
 pub const ARIA: &str = "cl-aria";
+/// Bearer token used by all tests for crew-lead operations (maps to ARIA).
+pub const CL_TOKEN: &str = "test-cl-aria";
+/// Bearer token for the first passenger (ps-001, Silver tier).
+pub const PS_TOKEN: &str = "test-ps-001";
 
-/// Build a fresh app with the demo world. Each test gets its OWN world
-/// so tests cannot interfere with each other (no shared global state).
+/// Build a fresh app with the demo world and well-known test tokens.
+/// Each test gets its OWN world so tests cannot interfere with each other.
 pub fn app() -> Router {
     let world = build_demo_world().expect("bootstrap");
-    let state = Arc::new(Mutex::new(world));
+    let api_keys: HashMap<String, String> = [
+        (CL_TOKEN.to_owned(), ARIA.to_owned()),
+        (PS_TOKEN.to_owned(), "ps-001".to_owned()),
+    ]
+    .into();
+    let state = AppState::new(world, api_keys);
     // FIX: router() now defaults to enable_reset=false; tests need /reset
     // to exercise the endpoint, so we call router_with explicitly.
     router_with(state, CorsOrigins::Any, true)
@@ -93,6 +103,28 @@ pub fn req(method: Method, path: &str, body: Option<Value>) -> Request<Body> {
             // value and returns a new builder (consuming style).
             b = b.header("content-type", "application/json");
             // Serialise the JSON Value to bytes for the request body.
+            Body::from(serde_json::to_vec(&v).expect("json"))
+        }
+        None => Body::empty(),
+    };
+    b.body(body).expect("request")
+}
+
+/// Build a `Request<Body>` with an `Authorization: Bearer <token>` header.
+/// Use this for all mutating endpoints (they require authentication now).
+pub fn auth_req(
+    method: Method,
+    path: &str,
+    token: &str,
+    body: Option<Value>,
+) -> Request<Body> {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("authorization", format!("Bearer {token}"));
+    let body = match body {
+        Some(v) => {
+            b = b.header("content-type", "application/json");
             Body::from(serde_json::to_vec(&v).expect("json"))
         }
         None => Body::empty(),

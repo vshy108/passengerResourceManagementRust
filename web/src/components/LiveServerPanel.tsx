@@ -82,7 +82,12 @@ export function LiveServerPanel(): JSX.Element {
           topResources: top.value,
           history: history.value,
         });
-        if (actorId === "" && cl.value[0]) setActorId(cl.value[0].id);
+        if (actorId === "" && cl.value[0]) {
+          setActorId(cl.value[0].id);
+          // FIX: actor identity now derived from bearer token, not request body.
+          // In demo mode, token == actor-id (server started with matching PRMS_API_KEYS).
+          api.setToken(cl.value[0].id);
+        }
         if (historyPid === "" && pax.value[0]) setHistoryPid(pax.value[0].id);
       }
     },
@@ -128,7 +133,6 @@ export function LiveServerPanel(): JSX.Element {
           </button>
           <button
             onClick={async () => {
-              const actorId = state.crewLeads[0]?.id ?? "cl-aria";
               if (
                 !window.confirm(
                   "Reset live server state? All passengers, resources and audit history will be replaced with the seeded demo world.",
@@ -136,7 +140,7 @@ export function LiveServerPanel(): JSX.Element {
               ) {
                 return;
               }
-              const r = await api.reset(actorId);
+              const r = await api.reset();
               announce(r.ok ? "Server state reset" : `reset failed: ${r.error}`);
               await refresh();
             }}
@@ -158,7 +162,11 @@ export function LiveServerPanel(): JSX.Element {
           <>
             <div className="row">
               <label className="muted">Acting Crew Lead:</label>
-              <select value={actorId} onChange={(e) => setActorId(e.target.value)}>
+              <select value={actorId} onChange={(e) => {
+                setActorId(e.target.value);
+                // FIX: update bearer token when crew-lead selection changes.
+                api.setToken(e.target.value);
+              }}>
                 {state.crewLeads.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} ({c.id})
@@ -169,7 +177,6 @@ export function LiveServerPanel(): JSX.Element {
 
             <CrewLeadsSection
               crewLeads={state.crewLeads}
-              actorId={actorId}
               onChange={(msg) => {
                 announce(msg);
                 void refresh();
@@ -178,7 +185,6 @@ export function LiveServerPanel(): JSX.Element {
 
             <PassengersSection
               passengers={state.passengers}
-              actorId={actorId}
               onChange={(msg) => {
                 announce(msg);
                 void refresh();
@@ -187,7 +193,6 @@ export function LiveServerPanel(): JSX.Element {
 
             <ResourcesSection
               resources={state.resources}
-              actorId={actorId}
               onChange={(msg) => {
                 announce(msg);
                 void refresh();
@@ -234,11 +239,9 @@ export function LiveServerPanel(): JSX.Element {
 
 function CrewLeadsSection({
   crewLeads,
-  actorId,
   onChange,
 }: {
   crewLeads: ApiCrewLead[];
-  actorId: string;
   onChange: (msg: string) => void;
 }): JSX.Element {
   const [oldId, setOldId] = useState<string>("");
@@ -246,8 +249,8 @@ function CrewLeadsSection({
   const [newName, setNewName] = useState<string>("");
 
   const submit = async (): Promise<void> => {
-    if (!actorId || !oldId || !newId || !newName) return;
-    const r = await api.replaceCrewLead(actorId, oldId, { id: newId, name: newName });
+    if (!oldId || !newId || !newName) return;
+    const r = await api.replaceCrewLead(oldId, { id: newId, name: newName });
     onChange(r.ok ? `Replaced ${oldId} → ${newId}` : `replace failed: ${r.error}`);
     if (r.ok) {
       setOldId("");
@@ -308,11 +311,9 @@ function CrewLeadsSection({
 
 function PassengersSection({
   passengers,
-  actorId,
   onChange,
 }: {
   passengers: ApiPassenger[];
-  actorId: string;
   onChange: (msg: string) => void;
 }): JSX.Element {
   const [id, setId] = useState<string>("");
@@ -320,8 +321,8 @@ function PassengersSection({
   const [tier, setTier] = useState<Tier>("Silver");
 
   const create = async (): Promise<void> => {
-    if (!actorId || !id || !name) return;
-    const r = await api.createPassenger(actorId, id, name, tier);
+    if (!id || !name) return;
+    const r = await api.createPassenger(id, name, tier);
     onChange(r.ok ? `Created passenger ${id}` : `create failed: ${r.error}`);
     if (r.ok) {
       setId("");
@@ -330,14 +331,12 @@ function PassengersSection({
   };
 
   const changeTier = async (pid: string, t: Tier): Promise<void> => {
-    if (!actorId) return;
-    const r = await api.changePassengerTier(actorId, pid, t);
+    const r = await api.changePassengerTier(pid, t);
     onChange(r.ok ? `${pid} → ${t}` : `change failed: ${r.error}`);
   };
 
   const remove = async (pid: string): Promise<void> => {
-    if (!actorId) return;
-    const r = await api.softDeletePassenger(actorId, pid);
+    const r = await api.softDeletePassenger(pid);
     onChange(r.ok ? `Deleted ${pid}` : `delete failed: ${r.error}`);
   };
 
@@ -406,11 +405,9 @@ function PassengersSection({
 
 function ResourcesSection({
   resources,
-  actorId,
   onChange,
 }: {
   resources: ApiResource[];
-  actorId: string;
   onChange: (msg: string) => void;
 }): JSX.Element {
   const [id, setId] = useState<string>("");
@@ -419,8 +416,8 @@ function ResourcesSection({
   const [minTier, setMinTier] = useState<Tier>("Silver");
 
   const create = async (): Promise<void> => {
-    if (!actorId || !id || !name) return;
-    const r = await api.createResource(actorId, id, name, category, minTier);
+    if (!id || !name) return;
+    const r = await api.createResource(id, name, category, minTier);
     onChange(r.ok ? `Created resource ${id}` : `create failed: ${r.error}`);
     if (r.ok) {
       setId("");
@@ -429,14 +426,12 @@ function ResourcesSection({
   };
 
   const changeMin = async (rid: string, t: Tier): Promise<void> => {
-    if (!actorId) return;
-    const r = await api.changeResourceMinTier(actorId, rid, t);
+    const r = await api.changeResourceMinTier(rid, t);
     onChange(r.ok ? `${rid} min → ${t}` : `change failed: ${r.error}`);
   };
 
   const remove = async (rid: string): Promise<void> => {
-    if (!actorId) return;
-    const r = await api.softDeleteResource(actorId, rid);
+    const r = await api.softDeleteResource(rid);
     onChange(r.ok ? `Deleted ${rid}` : `delete failed: ${r.error}`);
   };
 
@@ -533,7 +528,13 @@ function AccessSection({
 
   const attempt = async (): Promise<void> => {
     if (!validPid || !validRid) return;
-    const r = await api.useResource(validPid, validRid);
+    // FIX: actor identity now derived from bearer token, not request body.
+    // Temporarily set the token to the passenger ID (demo mode: token == id),
+    // then restore the previous crew-lead token after the access attempt.
+    const prevToken = api.getToken();
+    api.setToken(validPid);
+    const r = await api.useResource(validRid);
+    api.setToken(prevToken);
     onResult(r.ok ? `Allowed (event #${r.value.id})` : r.error);
   };
 

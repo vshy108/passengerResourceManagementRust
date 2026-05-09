@@ -21,7 +21,7 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use http_common::{ARIA, app, req, send};
+use http_common::{CL_TOKEN, app, auth_req, req, send};
 
 // `#[tokio::test]` is the async equivalent of `#[test]` — the macro
 // wraps the test in a tokio runtime so we can `.await` futures inside.
@@ -114,11 +114,11 @@ async fn unknown_tier_string_is_rejected() {
     let app = app();
     let (status, _) = send(
         &app,
-        req(
+        auth_req(
             Method::POST,
             "/passengers",
+            CL_TOKEN,
             Some(json!({
-                "actor_id": ARIA,
                 "id": "ps-x",
                 "name": "X",
                 "tier": "Bronze"
@@ -137,7 +137,6 @@ async fn oversized_body_is_rejected_with_413() {
     // verify the `DefaultBodyLimit` middleware rejects it with 413.
     let huge = "x".repeat(70 * 1024);
     let body = json!({
-        "actor_id": ARIA,
         "id": "ps-x",
         "name": huge,
         "tier": "Silver"
@@ -146,6 +145,7 @@ async fn oversized_body_is_rejected_with_413() {
         .method(Method::POST)
         .uri("/passengers")
         .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {CL_TOKEN}"))
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     let res = app.clone().oneshot(r).await.unwrap();

@@ -7,7 +7,7 @@ mod http_common;
 use axum::http::{Method, StatusCode};
 use serde_json::json;
 
-use http_common::{ARIA, app, req, send};
+use http_common::{ARIA, CL_TOKEN, app, auth_req, req, send};
 
 #[tokio::test]
 async fn list_crew_leads_returns_three_seeded_leads() {
@@ -24,9 +24,10 @@ async fn add_crew_lead_returns_409_limit_reached() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
+        auth_req(
             Method::POST,
             "/crew-leads",
+            CL_TOKEN,
             Some(json!({"lead": {"id": "cl-x", "name": "X"}})),
         ),
     )
@@ -40,11 +41,7 @@ async fn remove_crew_lead_returns_409_minimum_breached() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
-            Method::DELETE,
-            "/crew-leads/cl-aria",
-            Some(json!({"actor_id": ARIA})),
-        ),
+        auth_req(Method::DELETE, "/crew-leads/cl-aria", CL_TOKEN, None),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -56,13 +53,11 @@ async fn replace_crew_lead_returns_204_and_updates_list() {
     let app = app();
     let (status, _) = send(
         &app,
-        req(
+        auth_req(
             Method::PUT,
             "/crew-leads/cl-aria",
-            Some(json!({
-                "actor_id": ARIA,
-                "new_lead": {"id": "cl-aria2", "name": "Aria 2"}
-            })),
+            CL_TOKEN,
+            Some(json!({"new_lead": {"id": "cl-aria2", "name": "Aria 2"}})),
         ),
     )
     .await;
@@ -88,13 +83,11 @@ async fn replace_crew_lead_unknown_id_returns_404() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
+        auth_req(
             Method::PUT,
             "/crew-leads/cl-zzz",
-            Some(json!({
-                "actor_id": ARIA,
-                "new_lead": {"id": "cl-y", "name": "Y"}
-            })),
+            CL_TOKEN,
+            Some(json!({"new_lead": {"id": "cl-y", "name": "Y"}})),
         ),
     )
     .await;

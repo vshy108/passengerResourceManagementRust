@@ -12,9 +12,9 @@
 //!   (default: false). Never enable this in production.
 //! - `--shutdown-grace-secs` / `PRMS_SHUTDOWN_GRACE_SECS` (default 10)
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::http::HeaderValue;
@@ -28,7 +28,7 @@ use clap::Parser;
 use passenger_resource_management::interface::composition_root::{
     build_demo_world, build_world_with_sqlite,
 };
-use passenger_resource_management::interface::http::{CorsOrigins, router_with};
+use passenger_resource_management::interface::http::{AppState, CorsOrigins, router_with};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -66,6 +66,12 @@ struct Args {
     // `default_value_t = 10` provides a typed (not stringly) default.
     #[arg(long, env = "PRMS_SHUTDOWN_GRACE_SECS", default_value_t = 10)]
     shutdown_grace_secs: u64,
+
+    /// Comma-separated `token:actor-id` API key pairs.
+    /// Example: `secret123:cl-aria,secret456:ps-001`
+    /// When unset, ALL authenticated endpoints return 401.
+    #[arg(long, env = "PRMS_API_KEYS")]
+    api_keys: Option<String>,
 }
 
 // `#[tokio::main]` is an attribute macro that wraps `main` in a tokio
@@ -141,9 +147,33 @@ async fn main() -> ExitCode {
             }
         }
     };
-    // Wrap the World in Arc<Mutex<...>> for sharing across handlers.
-    // See in_memory_admin_event_sink.rs for the pattern explanation.
-    let state = Arc::new(Mutex::new(world));
+    // Parse `token:actor-id` pairs from the PRMS_API_KEYS env var / flag.
+    // FIX: actor identity derived from server-side key map, never from request body.
+    let api_keys: HashMap<String, String> = args
+        .api_keys
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|pair| {
+            let mut parts = pair.splitn(2, ':');
+            let token = parts.next()?.trim().to_owned();
+            let actor = parts.next()?.trim().to_owned();
+            Some((token, actor))
+        })
+        .collect();
+
+    if api_keys.is_empty() {
+        tracing::warn!(
+            "No API keys configured (PRMS_API_KEYS is unset). \
+             All authenticated endpoints will return 401."
+        );
+    } else {
+        tracing::info!(count = api_keys.len(), "API keys loaded.");
+    }
+
+    let state = AppState::new(world, api_keys);
 
     // Build the router and add request tracing as the OUTERMOST layer
     // (logs every request/response pair).

@@ -94,7 +94,6 @@ impl From<CrewLeadDto> for CrewLead {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReplaceCrewLeadReq {
-    pub actor_id: String,
     pub new_lead: CrewLeadDto,
 }
 
@@ -127,7 +126,6 @@ impl From<&Passenger> for PassengerDto {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreatePassengerReq {
-    pub actor_id: String,
     pub id: String,
     pub name: String,
     pub tier: TierDto,
@@ -136,14 +134,7 @@ pub struct CreatePassengerReq {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChangeTierReq {
-    pub actor_id: String,
     pub tier: TierDto,
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ActorOnlyReq {
-    pub actor_id: String,
 }
 
 // ---------- resource ----------------------------------------------------
@@ -172,7 +163,6 @@ impl From<&Resource> for ResourceDto {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateResourceReq {
-    pub actor_id: String,
     pub id: String,
     pub name: String,
     pub category: String,
@@ -184,7 +174,6 @@ pub struct CreateResourceReq {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UseResourceReq {
-    pub passenger_id: String,
     pub resource_id: String,
 }
 
@@ -328,12 +317,6 @@ pub struct AccessibleQuery {
 #[serde(deny_unknown_fields)]
 pub struct AddCrewLeadReq {
     pub lead: CrewLeadDto,
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct RemoveCrewLeadReq {
-    pub actor_id: String,
 }
 
 // ---------- error envelope ----------------------------------------------

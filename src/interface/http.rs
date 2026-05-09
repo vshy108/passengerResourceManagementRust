@@ -12,19 +12,21 @@
 
 // Standard-library threading primitives. See in_memory_admin_event_sink
 // for the Arc<Mutex<...>> pattern explanation.
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 // `axum` is the HTTP framework. The `use { a, b, c }` syntax imports
 // multiple items from one path in a single statement.
-use axum::{
+use axum::
+    {
     Json, Router,
     // Axum *extractors* — types that pull data out of a request:
     //   Path<T>   -> URL path parameters
     //   Query<T>  -> query-string parameters (?foo=bar)
     //   State<T>  -> shared application state (AppState here)
     //   Json<T>   -> deserialised JSON body (also used for responses)
-    extract::{DefaultBodyLimit, Path, Query, State},
-    http::{HeaderName, HeaderValue, StatusCode},
+    extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State},
+    http::{HeaderName, HeaderValue, StatusCode, request::Parts},
     response::{IntoResponse, Response},
     // HTTP method routers — `get(handler)` registers a GET handler.
     routing::{get, patch, post, put},
@@ -42,16 +44,31 @@ use crate::domain::resource::ResourceId;
 use crate::domain::tier::Tier;
 use crate::interface::composition_root::{World, build_demo_world};
 use crate::interface::dto::{
-    AccessibleQuery, ActorOnlyReq, AddCrewLeadReq, AdminEventDto, ChangeTierReq,
+    AccessibleQuery, AddCrewLeadReq, AdminEventDto, ChangeTierReq,
     CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, HealthReadyDto, OutcomeDto,
-    PaginationQuery, PassengerDto, RemoveCrewLeadReq, ReplaceCrewLeadReq, ResourceDto,
+    PaginationQuery, PassengerDto, ReplaceCrewLeadReq, ResourceDto,
     TierCountsDto, TierDto, TopNQuery, TopResourceDto, UsageEventDto, UseResourceReq,
 };
 
-/// Shared state held by every handler.
-// `type` declares an alias — `AppState` is just a shorter name for the
-// `Arc<Mutex<World>>` triple. Doesn't introduce a new type.
-pub type AppState = Arc<Mutex<World>>;
+/// Shared state held by every handler — bundles the mutable World
+/// (behind a mutex) with the immutable API key→actor-ID lookup table.
+///
+/// `Clone` is cheap: both fields are `Arc`-wrapped.
+#[derive(Clone)]
+pub struct AppState {
+    world: Arc<Mutex<World>>,
+    /// Maps bearer token → actor ID string. Immutable after construction.
+    api_keys: Arc<HashMap<String, String>>,
+}
+
+impl AppState {
+    pub fn new(world: World, api_keys: HashMap<String, String>) -> Self {
+        Self {
+            world: Arc::new(Mutex::new(world)),
+            api_keys: Arc::new(api_keys),
+        }
+    }
+}
 
 /// CORS origin policy. `Any` accepts any origin (dev/demo default);
 /// `List` accepts only the listed origins (production-style).
@@ -202,7 +219,43 @@ fn lock_world(state: &AppState) -> std::sync::MutexGuard<'_, World> {
     // handler panicked mid-mutation, leaving the World in an
     // unknown state. Continuing would corrupt the audit trail, so
     // we deliberately propagate the panic to crash the worker.
-    state.lock().expect("world mutex poisoned")
+    state.world.lock().expect("world mutex poisoned")
+}
+
+/// Axum extractor that resolves an `Authorization: Bearer <token>` header
+/// to the actor-ID string stored in `AppState::api_keys`.
+/// Returns 401 Unauthorized if the header is absent or the token is unknown.
+pub struct AuthActor(pub String);
+
+impl FromRequestParts<AppState> for AuthActor {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        // Extract "Authorization: Bearer <token>" header and strip the prefix.
+        let token = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.strip_prefix("Bearer "))
+            .map(str::trim);
+
+        match token.and_then(|t| state.api_keys.get(t)) {
+            Some(actor_id) => Ok(AuthActor(actor_id.clone())),
+            // FIX: missing/unknown token returns 401 (not 403) — the caller
+            // is unauthenticated, not merely unauthorised for this resource.
+            None => Err((
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorBody {
+                    error: "missing or invalid bearer token".into(),
+                    code: "Unauthorized".into(),
+                }),
+            )
+                .into_response()),
+        }
+    }
 }
 
 // ---------- handlers ---------------------------------------------------
@@ -227,7 +280,7 @@ async fn health() -> &'static str {
     ))]
 async fn health_ready(State(state): State<AppState>) -> Response {
     use crate::application::ports::UsageEventSource;
-    match state.lock() {
+    match state.world.lock() {
         Err(_) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ErrorBody {
@@ -322,12 +375,13 @@ async fn replace_crew_lead(
     // it consumes the request body. Using two body extractors is a
     // compile error caught by axum's trait bounds.
     Path(old_id): Path<String>,
+    AuthActor(actor_id): AuthActor,
     Json(req): Json<ReplaceCrewLeadReq>,
 ) -> Response {
     // `&mut w` because `replace_audited` mutates the service state.
     let mut w = lock_world(&state);
     match w.crew_leads.replace_audited(
-        &CrewLeadId(req.actor_id),
+        &CrewLeadId(actor_id),
         &CrewLeadId(old_id),
         // `req.new_lead.into()` calls `From<CrewLeadDto> for CrewLead`.
         req.new_lead.into(),
@@ -354,10 +408,11 @@ async fn list_passengers(State(state): State<AppState>) -> Json<Vec<PassengerDto
         (status = 409, body = ErrorBody)))]
 async fn create_passenger(
     State(state): State<AppState>,
+    AuthActor(actor_id): AuthActor,
     Json(req): Json<CreatePassengerReq>,
 ) -> Response {
     let mut w = lock_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(req.actor_id));
+    let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w
         .passengers
         .create(&actor, PassengerId(req.id), req.name, Tier::from(req.tier))
@@ -374,10 +429,11 @@ async fn create_passenger(
 async fn change_passenger_tier(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    AuthActor(actor_id): AuthActor,
     Json(req): Json<ChangeTierReq>,
 ) -> Response {
     let mut w = lock_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(req.actor_id));
+    let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w
         .passengers
         .change_tier(&actor, &PassengerId(id), Tier::from(req.tier))
@@ -389,15 +445,14 @@ async fn change_passenger_tier(
 
 #[utoipa::path(delete, path = "/passengers/{id}", tag = "passengers",
     params(("id" = String, Path)),
-    request_body = ActorOnlyReq,
-    responses((status = 204), (status = 404, body = ErrorBody)))]
+    responses((status = 204), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody)))]
 async fn soft_delete_passenger(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<ActorOnlyReq>,
+    AuthActor(actor_id): AuthActor,
 ) -> Response {
     let mut w = lock_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(req.actor_id));
+    let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w.passengers.soft_delete(&actor, &PassengerId(id)) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => err_response_owned(&e),
@@ -418,10 +473,11 @@ async fn list_resources(State(state): State<AppState>) -> Json<Vec<ResourceDto>>
         (status = 409, body = ErrorBody)))]
 async fn create_resource(
     State(state): State<AppState>,
+    AuthActor(actor_id): AuthActor,
     Json(req): Json<CreateResourceReq>,
 ) -> Response {
     let mut w = lock_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(req.actor_id));
+    let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w.resources.create(
         &actor,
         ResourceId(req.id),
@@ -441,10 +497,11 @@ async fn create_resource(
 async fn change_resource_min_tier(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    AuthActor(actor_id): AuthActor,
     Json(req): Json<ChangeTierReq>,
 ) -> Response {
     let mut w = lock_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(req.actor_id));
+    let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w
         .resources
         .change_min_tier(&actor, &ResourceId(id), Tier::from(req.tier))
@@ -456,15 +513,14 @@ async fn change_resource_min_tier(
 
 #[utoipa::path(delete, path = "/resources/{id}", tag = "resources",
     params(("id" = String, Path)),
-    request_body = ActorOnlyReq,
-    responses((status = 204), (status = 404, body = ErrorBody)))]
+    responses((status = 204), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody)))]
 async fn soft_delete_resource(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<ActorOnlyReq>,
+    AuthActor(actor_id): AuthActor,
 ) -> Response {
     let mut w = lock_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(req.actor_id));
+    let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w.resources.soft_delete(&actor, &ResourceId(id)) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => err_response_owned(&e),
@@ -476,9 +532,13 @@ async fn soft_delete_resource(
     responses(
         (status = 200, body = UsageEventDto),
         (status = 403, body = ErrorBody)))]
-async fn use_resource(State(state): State<AppState>, Json(req): Json<UseResourceReq>) -> Response {
+async fn use_resource(
+    State(state): State<AppState>,
+    AuthActor(actor_id): AuthActor,
+    Json(req): Json<UseResourceReq>,
+) -> Response {
     let mut w = lock_world(&state);
-    let actor = Actor::Passenger(PassengerId(req.passenger_id));
+    let actor = Actor::Passenger(PassengerId(actor_id));
     // BORROW SPLITTING: `access.use_resource` needs `&mut self` on
     // `access` AND immutable borrows on `passengers` + `resources`,
     // all from the same `World`. The borrow checker won't let us call
@@ -610,7 +670,11 @@ async fn report_personal_history(
     responses(
         (status = 204),
         (status = 409, body = ErrorBody)))]
-async fn add_crew_lead(State(state): State<AppState>, Json(req): Json<AddCrewLeadReq>) -> Response {
+async fn add_crew_lead(
+    State(state): State<AppState>,
+    _auth: AuthActor,
+    Json(req): Json<AddCrewLeadReq>,
+) -> Response {
     let mut w = lock_world(&state);
     // CL-R2 — always 409 (`CrewLeadLimitReached`) by design.
     match w.crew_leads.add(req.lead.into()) {
@@ -621,14 +685,14 @@ async fn add_crew_lead(State(state): State<AppState>, Json(req): Json<AddCrewLea
 
 #[utoipa::path(delete, path = "/crew-leads/{id}", tag = "crew-leads",
     params(("id" = String, Path)),
-    request_body = RemoveCrewLeadReq,
     responses(
         (status = 204),
+        (status = 401, body = ErrorBody),
         (status = 409, body = ErrorBody)))]
 async fn remove_crew_lead(
     State(state): State<AppState>,
+    _auth: AuthActor,
     Path(id): Path<String>,
-    Json(_req): Json<RemoveCrewLeadReq>,
 ) -> Response {
     let mut w = lock_world(&state);
     // CL-R3 — always 409 (`CrewLeadMinimumBreached`) by design.
@@ -678,9 +742,11 @@ async fn list_accessible_resources(
 }
 
 #[utoipa::path(post, path = "/reset", tag = "system",
-    request_body = ActorOnlyReq,
-    responses((status = 204), (status = 403, body = ErrorBody)))]
-async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq>) -> Response {
+    responses((status = 204), (status = 401, body = ErrorBody), (status = 403, body = ErrorBody)))]
+async fn reset_world(
+    State(state): State<AppState>,
+    AuthActor(actor_id): AuthActor,
+) -> Response {
     // Demo-only affordance, but still gated: caller must identify as
     // an existing crew lead so an anonymous client can't wipe state.
     {
@@ -688,8 +754,8 @@ async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq
         // the `*lock_world(...) = fresh` reassignment below — otherwise
         // we'd hold two guards at once and deadlock.
         let w = lock_world(&state);
-        let actor_id = CrewLeadId(req.actor_id.clone());
-        if !w.crew_leads.list().iter().any(|c| c.id == actor_id) {
+        let id = CrewLeadId(actor_id.clone());
+        if !w.crew_leads.list().iter().any(|c| c.id == id) {
             return err_response_owned(&DomainError::UnauthorizedActor);
         }
     }
@@ -734,10 +800,10 @@ async fn reset_world(State(state): State<AppState>, Json(req): Json<ActorOnlyReq
     ),
     components(schemas(
         TierDto, OutcomeDto,
-        CrewLeadDto, AddCrewLeadReq, ReplaceCrewLeadReq, RemoveCrewLeadReq,
+        CrewLeadDto, AddCrewLeadReq, ReplaceCrewLeadReq,
         PassengerDto, CreatePassengerReq, ChangeTierReq,
         ResourceDto, CreateResourceReq,
-        ActorOnlyReq, UseResourceReq,
+        UseResourceReq,
         UsageEventDto, AdminEventDto,
         TierCountsDto, TopResourceDto,
         HealthReadyDto,

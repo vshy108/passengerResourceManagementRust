@@ -10,7 +10,7 @@ mod http_common;
 use axum::http::{Method, StatusCode};
 use serde_json::json;
 
-use http_common::{ARIA, app, req, send};
+use http_common::{CL_TOKEN, app, auth_req, req, send};
 
 #[tokio::test]
 async fn list_passengers_returns_three_seeded() {
@@ -25,11 +25,11 @@ async fn create_passenger_returns_201() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
+        auth_req(
             Method::POST,
             "/passengers",
+            CL_TOKEN,
             Some(json!({
-                "actor_id": ARIA,
                 "id": "ps-new",
                 "name": "New",
                 "tier": "Gold"
@@ -47,11 +47,11 @@ async fn create_passenger_rejects_unknown_field() {
     let app = app();
     let (status, _) = send(
         &app,
-        req(
+        auth_req(
             Method::POST,
             "/passengers",
+            CL_TOKEN,
             Some(json!({
-                "actor_id": ARIA,
                 "id": "ps-x",
                 "name": "X",
                 "tier": "Silver",
@@ -68,11 +68,11 @@ async fn create_passenger_duplicate_id_returns_409() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
+        auth_req(
             Method::POST,
             "/passengers",
+            CL_TOKEN,
             Some(json!({
-                "actor_id": ARIA,
                 "id": "ps-001",
                 "name": "Dup",
                 "tier": "Silver"
@@ -106,10 +106,11 @@ async fn change_passenger_tier_returns_204_and_persists() {
     let app = app();
     let (status, _) = send(
         &app,
-        req(
+        auth_req(
             Method::PATCH,
             "/passengers/ps-001/tier",
-            Some(json!({"actor_id": ARIA, "tier": "Platinum"})),
+            CL_TOKEN,
+            Some(json!({"tier": "Platinum"})),
         ),
     )
     .await;
@@ -123,10 +124,11 @@ async fn change_tier_unknown_passenger_returns_404() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
+        auth_req(
             Method::PATCH,
             "/passengers/ps-zzz/tier",
-            Some(json!({"actor_id": ARIA, "tier": "Gold"})),
+            CL_TOKEN,
+            Some(json!({"tier": "Gold"})),
         ),
     )
     .await;
@@ -139,11 +141,7 @@ async fn soft_delete_passenger_drops_from_list_but_get_still_finds_it() {
     let app = app();
     let (status, _) = send(
         &app,
-        req(
-            Method::DELETE,
-            "/passengers/ps-001",
-            Some(json!({"actor_id": ARIA})),
-        ),
+        auth_req(Method::DELETE, "/passengers/ps-001", CL_TOKEN, None),
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
@@ -167,11 +165,7 @@ async fn delete_unknown_passenger_returns_404() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
-            Method::DELETE,
-            "/passengers/ps-zzz",
-            Some(json!({"actor_id": ARIA})),
-        ),
+        auth_req(Method::DELETE, "/passengers/ps-zzz", CL_TOKEN, None),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);

@@ -8,7 +8,7 @@ mod http_common;
 use axum::http::{Method, StatusCode};
 use serde_json::json;
 
-use http_common::{ARIA, app, req, send};
+use http_common::{CL_TOKEN, app, auth_req, req, send};
 
 #[tokio::test]
 async fn list_resources_returns_three_seeded() {
@@ -23,11 +23,11 @@ async fn create_resource_returns_201() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
+        auth_req(
             Method::POST,
             "/resources",
+            CL_TOKEN,
             Some(json!({
-                "actor_id": ARIA,
                 "id": "res-new",
                 "name": "New",
                 "category": "test",
@@ -46,11 +46,11 @@ async fn create_resource_duplicate_id_returns_409() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
+        auth_req(
             Method::POST,
             "/resources",
+            CL_TOKEN,
             Some(json!({
-                "actor_id": ARIA,
                 "id": "res-lounge",
                 "name": "Dup",
                 "category": "test",
@@ -101,10 +101,11 @@ async fn change_resource_min_tier_persists() {
     let app = app();
     let (status, _) = send(
         &app,
-        req(
+        auth_req(
             Method::PATCH,
             "/resources/res-lounge/min-tier",
-            Some(json!({"actor_id": ARIA, "tier": "Platinum"})),
+            CL_TOKEN,
+            Some(json!({"tier": "Platinum"})),
         ),
     )
     .await;
@@ -118,10 +119,11 @@ async fn change_min_tier_unknown_resource_returns_404() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
+        auth_req(
             Method::PATCH,
             "/resources/res-zzz/min-tier",
-            Some(json!({"actor_id": ARIA, "tier": "Gold"})),
+            CL_TOKEN,
+            Some(json!({"tier": "Gold"})),
         ),
     )
     .await;
@@ -134,11 +136,7 @@ async fn soft_delete_resource_returns_204() {
     let app = app();
     let (status, _) = send(
         &app,
-        req(
-            Method::DELETE,
-            "/resources/res-lounge",
-            Some(json!({"actor_id": ARIA})),
-        ),
+        auth_req(Method::DELETE, "/resources/res-lounge", CL_TOKEN, None),
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
@@ -149,11 +147,7 @@ async fn delete_unknown_resource_returns_404() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
-            Method::DELETE,
-            "/resources/res-zzz",
-            Some(json!({"actor_id": ARIA})),
-        ),
+        auth_req(Method::DELETE, "/resources/res-zzz", CL_TOKEN, None),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);

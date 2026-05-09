@@ -9,17 +9,18 @@ mod http_common;
 use axum::http::{Method, StatusCode};
 use serde_json::json;
 
-use http_common::{app, req, send};
+use http_common::{PS_TOKEN, app, auth_req, req, send};
 
 #[tokio::test]
 async fn access_allowed_returns_event() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
+        auth_req(
             Method::POST,
             "/access",
-            Some(json!({"passenger_id": "ps-001", "resource_id": "res-lounge"})),
+            PS_TOKEN,
+            Some(json!({"resource_id": "res-lounge"})),
         ),
     )
     .await;
@@ -32,10 +33,11 @@ async fn access_denied_returns_403_with_event_recorded() {
     let app = app();
     let (status, body) = send(
         &app,
-        req(
+        auth_req(
             Method::POST,
             "/access",
-            Some(json!({"passenger_id": "ps-001", "resource_id": "res-bridge"})),
+            PS_TOKEN,
+            Some(json!({"resource_id": "res-bridge"})),
         ),
     )
     .await;

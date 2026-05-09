@@ -19,7 +19,10 @@ const API = "http://127.0.0.1:8080";
 /** Reset server to the seeded demo world before each test. */
 async function resetServer(): Promise<void> {
   const ctx = await request.newContext({ baseURL: API });
-  const r = await ctx.post("/reset", { data: { actor_id: "cl-aria" } });
+  // FIX: actor identity now derived from bearer token, not request body.
+  const r = await ctx.post("/reset", {
+    headers: { Authorization: "Bearer cl-aria-e2e-token" },
+  });
   if (!r.ok()) {
     throw new Error(
       `POST /reset failed: ${r.status()} — is the server running with --enable-reset?`,
