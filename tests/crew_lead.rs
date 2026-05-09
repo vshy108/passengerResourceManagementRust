@@ -8,6 +8,8 @@
 use passenger_resource_management::application::crew_lead_service::CrewLeadService;
 use passenger_resource_management::domain::crew_lead::{CrewLead, CrewLeadId};
 use passenger_resource_management::domain::errors::DomainError;
+use passenger_resource_management::infrastructure::fake_clock::FakeClock;
+use passenger_resource_management::infrastructure::in_memory_admin_event_sink::InMemoryAdminEventSink;
 
 fn lead(id: &str, name: &str) -> CrewLead {
     CrewLead {
@@ -147,4 +149,36 @@ fn cl_s11_list_preserves_bootstrap_insertion_order() {
     let svc = CrewLeadService::bootstrap(three_distinct_leads()).unwrap();
     let ids: Vec<&str> = svc.list().iter().map(|l| l.id.0.as_str()).collect();
     assert_eq!(ids, vec!["a", "b", "c"]);
+}
+
+// -- bootstrap_audited / replace_audited (CL-S15/S16) -----------------
+
+#[test]
+fn cl_s15_bootstrap_audited_with_invalid_leads_returns_error() {
+    // FIX: `bootstrap_audited` forwards to `bootstrap`, which fails when
+    // leads.len() != 3. The `?` error branch at crew_lead_service.rs
+    // line 155 was never taken because the HTTP tests always call it
+    // with the valid 3-lead demo set.
+    let result = CrewLeadService::bootstrap_audited(
+        vec![lead("a", "Alice"), lead("b", "Bob")], // only 2 — invalid
+        Box::new(FakeClock::default()),
+        Box::new(InMemoryAdminEventSink::new()),
+    );
+    assert_eq!(result.err(), Some(DomainError::CrewLeadBootstrapInvalid));
+}
+
+#[test]
+fn cl_s16_replace_audited_without_audit_cfg_still_replaces() {
+    // FIX: `replace_audited` contains `if let Some(audit) = self.audit.as_mut()`.
+    // When the service was constructed via plain `bootstrap()` (audit = None),
+    // the None branch at crew_lead_service.rs line 214 was never taken.
+    let mut svc = CrewLeadService::bootstrap(three_distinct_leads()).unwrap();
+    let actor = CrewLeadId::from("a");
+    // Replace "a" with "d" — should succeed and update the list.
+    svc.replace_audited(&actor, &CrewLeadId::from("a"), lead("d", "Dan"))
+        .expect("CL-S16");
+    assert_eq!(svc.list().len(), 3);
+    let ids: Vec<&str> = svc.list().iter().map(|l| l.id.0.as_str()).collect();
+    assert!(ids.contains(&"d"));
+    assert!(!ids.contains(&"a"));
 }
