@@ -115,7 +115,10 @@ fn idempotency_get(state: &AppState, key: &str) -> Option<Response> {
     // Opportunistic eviction of expired entries to bound memory growth.
     cache.retain(|_, v| v.expires_at > now);
     cache.get(key).map(|e| {
-        (e.status, e.body.clone()).into_response()
+        // FIX: (StatusCode, Bytes).into_response() does not set Content-Type.
+        // Explicitly set application/json so retried requests are indistinguishable
+        // from the original 201 response.
+        (e.status, [(axum::http::header::CONTENT_TYPE, "application/json")], e.body.clone()).into_response()
     })
 }
 
@@ -632,9 +635,14 @@ async fn create_passenger(
             w.flush_to_db();
             tracing::info!(passenger_id = %p.id.0, tier = ?p.tier, actor = %actor_id, "passenger created");
             let dto = PassengerDto::from(&p);
-            let body = serde_json::to_vec(&dto).unwrap_or_default();
+            // FIX: use expect — serialization of a fixed DTO is an invariant, not
+            // a recoverable error. unwrap_or_default() would cache empty bytes and
+            // return a silent empty body on retry.
+            let body = serde_json::to_vec(&dto)
+                .expect("PassengerDto serialization is infallible");
             if let Some(key) = idem_key {
-                idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body.clone()));
+                // FIX: body is not used after this point; drop the redundant clone.
+                idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body));
             }
             (StatusCode::CREATED, Json(dto)).into_response()
         }
@@ -742,9 +750,14 @@ async fn create_resource(
             w.flush_to_db();
             tracing::info!(resource_id = %r.id.0, min_tier = ?r.min_tier, actor = %actor_id, "resource created");
             let dto = ResourceDto::from(&r);
-            let body = serde_json::to_vec(&dto).unwrap_or_default();
+            // FIX: use expect — serialization of a fixed DTO is an invariant, not
+            // a recoverable error. unwrap_or_default() would cache empty bytes and
+            // return a silent empty body on retry.
+            let body = serde_json::to_vec(&dto)
+                .expect("ResourceDto serialization is infallible");
             if let Some(key) = idem_key {
-                idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body.clone()));
+                // FIX: body is not used after this point; drop the redundant clone.
+                idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body));
             }
             (StatusCode::CREATED, Json(dto)).into_response()
         }
