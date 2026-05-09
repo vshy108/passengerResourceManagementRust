@@ -168,3 +168,15 @@ fn rs_s11_list_accessible_for_excludes_soft_deleted() {
     svc.soft_delete(&admin(), &ResourceId::from("s1")).unwrap();
     assert!(svc.list_accessible_for(Tier::Platinum).is_empty());
 }
+
+// RS-S12: soft_delete on unknown id ----------------------------------------
+
+#[test]
+fn rs_s12_soft_delete_unknown_id_returns_not_found() {
+    // FIX: the `?` error branch on `.ok_or(DomainError::ResourceNotFound)`
+    // inside `soft_delete` was never exercised (resource_service.rs line 122)
+    // because every prior test only deleted resources that existed.
+    let mut svc = svc();
+    let res = svc.soft_delete(&admin(), &ResourceId::from("zzz"));
+    assert_eq!(res, Err(DomainError::ResourceNotFound));
+}
