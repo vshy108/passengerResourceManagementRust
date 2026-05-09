@@ -251,3 +251,35 @@ fn au_s11_create_change_delete_recorded_in_order() {
         ]
     );
 }
+
+// -- AdminEventDto serialisation (dto.rs lines 342-343) ----------------
+
+#[test]
+#[cfg(feature = "http")]
+fn au_s12_admin_event_dto_serialises_crew_lead_added_and_removed() {
+    use passenger_resource_management::domain::admin_event::AdminEvent;
+    use passenger_resource_management::domain::timestamp::Timestamp;
+    use passenger_resource_management::interface::dto::AdminEventDto;
+
+    // FIX: `CrewLeadAdded` and `CrewLeadRemoved` branches in
+    // `admin_action_str()` (dto.rs lines 342-343) are dead code via
+    // the HTTP layer (add/remove always fail per CL-R2/R3). We reach
+    // them here by constructing AdminEvents directly and converting via
+    // `From<&AdminEvent> for AdminEventDto`.
+    for (action, expected_str) in [
+        (AdminAction::CrewLeadAdded, "CrewLeadAdded"),
+        (AdminAction::CrewLeadRemoved, "CrewLeadRemoved"),
+    ] {
+        let event = AdminEvent {
+            id: "test-id".to_owned(),
+            actor_id: CrewLeadId::from("cl-a"),
+            action,
+            target_kind: TargetKind::CrewLead,
+            target_id: "cl-b".to_owned(),
+            timestamp: Timestamp(0),
+            details: None,
+        };
+        let dto = AdminEventDto::from(&event);
+        assert_eq!(dto.action, expected_str, "action string mismatch for {action:?}");
+    }
+}
