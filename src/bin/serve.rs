@@ -204,7 +204,15 @@ async fn main() -> ExitCode {
     // drain timeout can begin counting from the moment ctrl-c arrived.
     // `oneshot` = single-producer single-consumer one-shot channel.
     let (signal_tx, signal_rx) = tokio::sync::oneshot::channel::<()>();
-    let serve_fut = axum::serve(listener, app).with_graceful_shutdown(async move {
+    let serve_fut = axum::serve(
+        listener,
+        // FIX: use into_make_service_with_connect_info so tower_governor's
+        // PeerIpKeyExtractor can find the peer SocketAddr. Without this,
+        // ConnectInfo<SocketAddr> is absent from request extensions and every
+        // request returns 500 "Unable To Extract Key!".
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
         // `async move { ... }` is an async block that captures
         // surrounding variables BY MOVE (so signal_tx lives long enough).
         // Await EITHER Ctrl+C (SIGINT) OR SIGTERM so container orchestrators

@@ -468,7 +468,10 @@ export interface operations {
     };
     list_crew_leads: {
         parameters: {
-            query?: never;
+            query?: {
+                offset?: number | null;
+                limit?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -629,7 +632,7 @@ export interface operations {
                     "application/json": components["schemas"]["HealthReadyDto"];
                 };
             };
-            /** @description World mutex poisoned */
+            /** @description World lock poisoned */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -642,7 +645,10 @@ export interface operations {
     };
     list_passengers: {
         parameters: {
-            query?: never;
+            query?: {
+                offset?: number | null;
+                limit?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -881,7 +887,10 @@ export interface operations {
     };
     list_resources: {
         parameters: {
-            query?: never;
+            query?: {
+                offset?: number | null;
+                limit?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;

@@ -13,7 +13,7 @@
 // Standard-library threading primitives. See in_memory_admin_event_sink
 // for the Arc<Mutex<...>> pattern explanation.
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 // `axum` is the HTTP framework. The `use { a, b, c }` syntax imports
 // multiple items from one path in a single statement.
@@ -54,12 +54,16 @@ use crate::interface::dto::{
 };
 
 /// Shared state held by every handler — bundles the mutable World
-/// (behind a mutex) with the immutable API key→actor-ID lookup table.
+/// (behind an `RwLock`) with the immutable API key→actor-ID lookup table.
 ///
 /// `Clone` is cheap: both fields are `Arc`-wrapped.
+///
+/// An `RwLock` is used instead of a `Mutex` so concurrent read-only requests
+/// (list, get, reports, audit) can proceed in parallel. Only mutating handlers
+/// need an exclusive write lock, which they hold for the minimum duration.
 #[derive(Clone)]
 pub struct AppState {
-    world: Arc<Mutex<World>>,
+    world: Arc<RwLock<World>>,
     /// Maps bearer token → actor ID string. Immutable after construction.
     api_keys: Arc<HashMap<String, String>>,
 }
@@ -67,7 +71,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(world: World, api_keys: HashMap<String, String>) -> Self {
         Self {
-            world: Arc::new(Mutex::new(world)),
+            world: Arc::new(RwLock::new(world)),
             api_keys: Arc::new(api_keys),
         }
     }
@@ -266,16 +270,24 @@ fn bad_request(msg: &str) -> Response {
         .into_response()
 }
 
-fn lock_world(state: &AppState) -> std::sync::MutexGuard<'_, World> {
-    // `MutexGuard<'_, World>` is the RAII lock guard: dereferences to
-    // `World`, releases the lock automatically when dropped.
-    // The `'_` is an anonymous lifetime tied to `state`.
-    //
-    // SAFETY (re: AGENTS.md §8): a poisoned lock means a previous
-    // handler panicked mid-mutation, leaving the World in an
-    // unknown state. Continuing would corrupt the audit trail, so
-    // we deliberately propagate the panic to crash the worker.
-    state.world.lock().expect("world mutex poisoned")
+/// Acquire a **shared** read lock on the World. Used by all read-only
+/// handlers so concurrent reads proceed without blocking each other.
+///
+/// # Panics
+/// If the `RwLock` is poisoned (a previous writer panicked mid-mutation).
+fn read_world(state: &AppState) -> std::sync::RwLockReadGuard<'_, World> {
+    // SAFETY (re: AGENTS.md §3): poisoned lock = World in unknown state;
+    // propagating the panic is correct — no silent corruption.
+    state.world.read().expect("world rwlock poisoned")
+}
+
+/// Acquire an **exclusive** write lock on the World. Used only by
+/// handlers that mutate state (create, update, delete, `use_resource`, reset).
+///
+/// # Panics
+/// If the `RwLock` is poisoned.
+fn write_world(state: &AppState) -> std::sync::RwLockWriteGuard<'_, World> {
+    state.world.write().expect("world rwlock poisoned")
 }
 
 /// Axum extractor that resolves an `Authorization: Bearer <token>` header
@@ -332,15 +344,15 @@ async fn health() -> &'static str {
 #[utoipa::path(get, path = "/health/ready", tag = "system",
     responses(
         (status = 200, description = "System ready — entity counts included", body = HealthReadyDto),
-        (status = 503, description = "World mutex poisoned", body = ErrorBody),
+        (status = 503, description = "World lock poisoned", body = ErrorBody),
     ))]
 async fn health_ready(State(state): State<AppState>) -> Response {
     use crate::application::ports::UsageEventSource;
-    match state.world.lock() {
+    match state.world.read() {
         Err(_) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ErrorBody {
-                error: "world mutex poisoned".into(),
+                error: "world rwlock poisoned".into(),
                 code: "InternalError".into(),
             }),
         )
@@ -362,7 +374,7 @@ async fn health_ready(State(state): State<AppState>) -> Response {
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     use crate::application::ports::UsageEventSource;
     use crate::domain::usage_event::Outcome;
-    let w = lock_world(&state);
+    let w = read_world(&state);
     let usage = w.access.sink().list();
     let allowed = usage.iter().filter(|e| e.outcome == Outcome::Allowed).count();
     let denied = usage.iter().filter(|e| e.outcome == Outcome::Denied).count();
@@ -412,7 +424,7 @@ async fn list_crew_leads(
     State(state): State<AppState>,
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<CrewLeadDto>> {
-    let w = lock_world(&state);
+    let w = read_world(&state);
     Json(
         w.crew_leads
             .list()
@@ -446,7 +458,7 @@ async fn replace_crew_lead(
         return bad_request(msg);
     }
     // `&mut w` because `replace_audited` mutates the service state.
-    let mut w = lock_world(&state);
+    let mut w = write_world(&state);
     match w.crew_leads.replace_audited(
         &CrewLeadId(actor_id),
         &CrewLeadId(old_id),
@@ -471,7 +483,7 @@ async fn list_passengers(
     State(state): State<AppState>,
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<PassengerDto>> {
-    let w = lock_world(&state);
+    let w = read_world(&state);
     Json(
         w.passengers
             .list()
@@ -497,7 +509,7 @@ async fn create_passenger(
     if let Err(msg) = req.validate() {
         return bad_request(msg);
     }
-    let mut w = lock_world(&state);
+    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w
         .passengers
@@ -521,7 +533,7 @@ async fn change_passenger_tier(
     AuthActor(actor_id): AuthActor,
     Json(req): Json<ChangeTierReq>,
 ) -> Response {
-    let mut w = lock_world(&state);
+    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w
         .passengers
@@ -543,7 +555,7 @@ async fn soft_delete_passenger(
     Path(id): Path<String>,
     AuthActor(actor_id): AuthActor,
 ) -> Response {
-    let mut w = lock_world(&state);
+    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w.passengers.soft_delete(&actor, &PassengerId(id)) {
         Ok(()) => {
@@ -561,7 +573,7 @@ async fn list_resources(
     State(state): State<AppState>,
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<ResourceDto>> {
-    let w = lock_world(&state);
+    let w = read_world(&state);
     Json(
         w.resources
             .list()
@@ -587,7 +599,7 @@ async fn create_resource(
     if let Err(msg) = req.validate() {
         return bad_request(msg);
     }
-    let mut w = lock_world(&state);
+    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w.resources.create(
         &actor,
@@ -614,7 +626,7 @@ async fn change_resource_min_tier(
     AuthActor(actor_id): AuthActor,
     Json(req): Json<ChangeTierReq>,
 ) -> Response {
-    let mut w = lock_world(&state);
+    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w
         .resources
@@ -636,7 +648,7 @@ async fn soft_delete_resource(
     Path(id): Path<String>,
     AuthActor(actor_id): AuthActor,
 ) -> Response {
-    let mut w = lock_world(&state);
+    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w.resources.soft_delete(&actor, &ResourceId(id)) {
         Ok(()) => {
@@ -661,7 +673,7 @@ async fn use_resource(
     if let Err(msg) = req.validate() {
         return bad_request(msg);
     }
-    let mut w = lock_world(&state);
+    let mut w = write_world(&state);
     let actor = Actor::Passenger(PassengerId(actor_id));
     // BORROW SPLITTING: `access.use_resource` needs `&mut self` on
     // `access` AND immutable borrows on `passengers` + `resources`,
@@ -690,7 +702,7 @@ async fn list_admin_events(
     State(state): State<AppState>,
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<AdminEventDto>> {
-    let w = lock_world(&state);
+    let w = read_world(&state);
     Json(
         w.audit_sink
             .snapshot()
@@ -710,7 +722,7 @@ async fn list_usage_events(
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<UsageEventDto>> {
     use crate::application::ports::UsageEventSource;
-    let w = lock_world(&state);
+    let w = read_world(&state);
     Json(
         w.access
             .sink()
@@ -727,7 +739,7 @@ async fn list_usage_events(
     responses((status = 200, body = Vec<TierCountsDto>)))]
 async fn report_by_tier(State(state): State<AppState>) -> Json<Vec<TierCountsDto>> {
     use crate::application::reporting_service::ReportingService;
-    let w = lock_world(&state);
+    let w = read_world(&state);
     let report = ReportingService::new(w.access.sink()).aggregate_by_tier();
     let mut rows: Vec<TierCountsDto> = report
         .into_iter()
@@ -755,7 +767,7 @@ async fn report_top_resources(
     Query(q): Query<TopNQuery>,
 ) -> Json<Vec<TopResourceDto>> {
     use crate::application::reporting_service::ReportingService;
-    let w = lock_world(&state);
+    let w = read_world(&state);
     let n = q.n.unwrap_or(5);
     Json(
         ReportingService::new(w.access.sink())
@@ -777,7 +789,7 @@ async fn report_personal_history(
     Path(passenger_id): Path<String>,
 ) -> Json<Vec<UsageEventDto>> {
     use crate::application::reporting_service::ReportingService;
-    let w = lock_world(&state);
+    let w = read_world(&state);
     Json(
         ReportingService::new(w.access.sink())
             .personal_history(&PassengerId(passenger_id))
@@ -799,7 +811,7 @@ async fn add_crew_lead(
     _auth: AuthActor,
     Json(req): Json<AddCrewLeadReq>,
 ) -> Response {
-    let mut w = lock_world(&state);
+    let mut w = write_world(&state);
     // CL-R2 — always 409 (`CrewLeadLimitReached`) by design.
     match w.crew_leads.add(req.lead.into()) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -818,7 +830,7 @@ async fn remove_crew_lead(
     _auth: AuthActor,
     Path(id): Path<String>,
 ) -> Response {
-    let mut w = lock_world(&state);
+    let mut w = write_world(&state);
     // CL-R3 — always 409 (`CrewLeadMinimumBreached`) by design.
     match w.crew_leads.remove(&CrewLeadId(id)) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -830,7 +842,7 @@ async fn remove_crew_lead(
     params(("id" = String, Path)),
     responses((status = 200, body = PassengerDto), (status = 404, body = ErrorBody)))]
 async fn get_passenger(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    let w = lock_world(&state);
+    let w = read_world(&state);
     match w.passengers.get(&PassengerId(id)) {
         Ok(p) => (StatusCode::OK, Json(PassengerDto::from(p))).into_response(),
         Err(e) => err_response_owned(&e),
@@ -841,7 +853,7 @@ async fn get_passenger(State(state): State<AppState>, Path(id): Path<String>) ->
     params(("id" = String, Path)),
     responses((status = 200, body = ResourceDto), (status = 404, body = ErrorBody)))]
 async fn get_resource(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    let w = lock_world(&state);
+    let w = read_world(&state);
     match w.resources.get(&ResourceId(id)) {
         Ok(r) => (StatusCode::OK, Json(ResourceDto::from(r))).into_response(),
         Err(e) => err_response_owned(&e),
@@ -855,7 +867,7 @@ async fn list_accessible_resources(
     State(state): State<AppState>,
     Query(q): Query<AccessibleQuery>,
 ) -> Json<Vec<ResourceDto>> {
-    let w = lock_world(&state);
+    let w = read_world(&state);
     Json(
         w.resources
             .list_accessible_for(Tier::from(q.tier))
@@ -874,10 +886,11 @@ async fn reset_world(
     // Demo-only affordance, but still gated: caller must identify as
     // an existing crew lead so an anonymous client can't wipe state.
     {
-        // Inner block scopes the lock guard so it's RELEASED before
-        // the `*lock_world(...) = fresh` reassignment below — otherwise
-        // we'd hold two guards at once and deadlock.
-        let w = lock_world(&state);
+        // Inner block scopes the read guard so it's RELEASED before
+        // the `*write_world(...) = fresh` reassignment below — otherwise
+        // we'd try to acquire a write lock while a read guard is live
+        // (deadlock with RwLock).
+        let w = read_world(&state);
         let id = CrewLeadId(actor_id.clone());
         if !w.crew_leads.list().iter().any(|c| c.id == id) {
             return err_response_owned(&DomainError::UnauthorizedActor);
@@ -887,10 +900,20 @@ async fn reset_world(
         Ok(w) => w,
         Err(e) => return err_response_owned(&e),
     };
-    // `*guard = value` writes through the deref to replace the World.
-    // The guard is dropped at the end of this expression, releasing
-    // the lock before we return.
-    *lock_world(&state) = fresh;
+    {
+        let mut w = write_world(&state);
+        // FIX: carry the SQLite entity store forward so the new demo state
+        // is persisted. Without this, the entity_store is dropped when the
+        // old World is replaced, losing all write-through persistence.
+        #[cfg(feature = "http")]
+        let entity_store = w.entity_store.take();
+        *w = fresh;
+        #[cfg(feature = "http")]
+        {
+            w.entity_store = entity_store;
+            w.flush_to_db();
+        }
+    }
     StatusCode::NO_CONTENT.into_response()
 }
 
