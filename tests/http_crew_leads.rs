@@ -186,3 +186,26 @@ async fn replace_crew_lead_oversized_new_name_returns_400() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["code"], "InvalidInput");
 }
+
+#[tokio::test]
+async fn replace_crew_lead_clashing_new_id_returns_409() {
+    // FIX: `replace_crew_lead` calls `replace_audited` which calls
+    // `replace`, which returns `CrewLeadAlreadyExists` when `new_lead.id`
+    // is already present. This exercises the `map_err` branch at
+    // http.rs line 303 that translates that error to 409.
+    let app = app();
+    // The seeded demo world has cl-aria, cl-noor, cl-jun.
+    // Try to rename cl-aria to cl-noor (already exists).
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::PUT,
+            "/crew-leads/cl-aria",
+            CL_TOKEN,
+            Some(json!({"new_lead": {"id": "cl-noor", "name": "Aria as Noor"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "CrewLeadAlreadyExists");
+}
