@@ -176,8 +176,9 @@ async fn main() -> ExitCode {
     let serve_fut = axum::serve(listener, app).with_graceful_shutdown(async move {
         // `async move { ... }` is an async block that captures
         // surrounding variables BY MOVE (so signal_tx lives long enough).
-        // `let _ = expr;` explicitly discards a Result we don't care about.
-        let _ = tokio::signal::ctrl_c().await;
+        // Await EITHER Ctrl+C (SIGINT) OR SIGTERM so container orchestrators
+        // (Docker, systemd, Kubernetes) trigger the graceful drain correctly.
+        shutdown_signal().await;
         tracing::info!("shutdown signal received; draining in-flight requests");
         let _ = signal_tx.send(());
     });
@@ -224,4 +225,36 @@ async fn main() -> ExitCode {
         }
     };
     exit
+}
+
+/// Resolves on SIGINT (Ctrl+C) OR SIGTERM (Docker/systemd/Kubernetes stop).
+///
+/// FIX: the previous implementation only caught SIGINT via `ctrl_c()`.
+/// Container orchestrators send SIGTERM first and only escalate to SIGKILL
+/// after the grace period. Without catching SIGTERM the server would be
+/// force-killed, potentially leaving the SQLite WAL in an un-checkpointed
+/// state. This function catches both signals so graceful drain always runs.
+#[allow(dead_code)] // Referenced from the closure inside with_graceful_shutdown
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    // SIGTERM only exists on Unix; on Windows we just wait for Ctrl+C.
+    #[cfg(unix)]
+    let sigterm = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let sigterm = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c  => { tracing::info!("SIGINT received") }
+        _ = sigterm => { tracing::info!("SIGTERM received") }
+    }
 }
