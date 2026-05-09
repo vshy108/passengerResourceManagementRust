@@ -45,6 +45,14 @@ export function LiveServerPanel(): JSX.Element {
   const [historyPid, setHistoryPid] = useState<string>("");
   const [topN, setTopN] = useState<number>(5);
   const [flash, setFlash] = useState<string>("");
+  // FIX: track 401 Unauthorized responses centrally so any handler failure
+  // surfaces a visible banner rather than silently failing per call-site.
+  const [authError, setAuthError] = useState<boolean>(false);
+
+  useEffect(() => {
+    // Subscribe to 401 events emitted by the api layer. Clear on token change.
+    return api.onUnauthorized(() => setAuthError(true));
+  }, []);
 
   const refresh = useCallback(
     async (pidForHistory?: string): Promise<void> => {
@@ -119,6 +127,18 @@ export function LiveServerPanel(): JSX.Element {
       <header>
         <h2>Live Rust server (HTTP)</h2>
       </header>
+      {authError && (
+        <div
+          className="tag denied"
+          style={{ margin: "0.5rem 1rem", padding: "0.5rem 1rem", borderRadius: 4 }}
+          data-testid="auth-error-banner"
+        >
+          ⚠️ 401 Unauthorized — check your API token (PRMS_API_KEYS).{" "}
+          <button onClick={() => setAuthError(false)} style={{ marginLeft: "0.5rem" }}>
+            Dismiss
+          </button>
+        </div>
+      )}
       <div className="body">
         <div className="row">
           <span className="muted">
@@ -165,7 +185,9 @@ export function LiveServerPanel(): JSX.Element {
               <select value={actorId} onChange={(e) => {
                 setActorId(e.target.value);
                 // FIX: update bearer token when crew-lead selection changes.
+                // Clear any stale 401 banner so the new token gets a clean slate.
                 api.setToken(e.target.value);
+                setAuthError(false);
               }}>
                 {state.crewLeads.map((c) => (
                   <option key={c.id} value={c.id}>

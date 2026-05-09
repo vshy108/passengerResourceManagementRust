@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  prms:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: prms:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # REQUIRED: set real tokens before deploying.
+      PRMS_API_KEYS: "crew-lead-token:cl-aria,passenger-token:ps-001"
+      # Optional: persist events to a named volume.
+      # PRMS_DB_PATH: /data/prms.db
+      # Optional: restrict CORS to your frontend origin.
+      # PRMS_CORS_ORIGINS: "http://localhost:5173"
+    # volumes:
+    #   - prms-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+# volumes:
+#   prms-data:

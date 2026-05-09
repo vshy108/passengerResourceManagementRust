@@ -43,6 +43,8 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<DomainError>([
   "CrewLeadLimitReached",
   "CrewLeadMinimumBreached",
   "CrewLeadBootstrapInvalid",
+  "InvalidInput",
+  "Unauthorized",
   "NetworkError",
   "Unknown",
 ]);
@@ -67,6 +69,19 @@ interface ErrorBody {
 let _token: string | null =
   (import.meta.env.VITE_API_TOKEN as string | undefined) ?? null;
 
+/**
+ * Subscribers notified when any API call returns 401 Unauthorized.
+ * The UI can subscribe to show an error banner / redirect to login.
+ */
+type UnauthorizedListener = () => void;
+const _unauthorizedListeners = new Set<UnauthorizedListener>();
+
+function notifyUnauthorized(): void {
+  for (const listener of _unauthorizedListeners) {
+    listener();
+  }
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<Result<T>> {
   try {
     const res = await fetch(`${getBase()}${path}`, {
@@ -85,6 +100,12 @@ async function call<T>(path: string, init?: RequestInit): Promise<Result<T>> {
     }
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as ErrorBody | null;
+      // FIX: propagate 401 to all registered listeners so the UI can show
+      // an "invalid/expired token" error banner without each call site
+      // needing to handle the Unauthorized code explicitly.
+      if (res.status === 401) {
+        notifyUnauthorized();
+      }
       return err(toDomainError(body?.code));
     }
     return ok((await res.json()) as T);
@@ -96,6 +117,19 @@ async function call<T>(path: string, init?: RequestInit): Promise<Result<T>> {
 export const api = {
   get base(): string {
     return getBase();
+  },
+
+  /**
+   * Register a callback invoked whenever any request returns 401 Unauthorized.
+   * Returns an unsubscribe function.
+   *
+   * Usage:
+   *   const unsub = api.onUnauthorized(() => setAuthError(true));
+   *   // later: unsub();
+   */
+  onUnauthorized(listener: UnauthorizedListener): () => void {
+    _unauthorizedListeners.add(listener);
+    return () => { _unauthorizedListeners.delete(listener); };
   },
 
   /** Configure the bearer token sent with every mutating request. */

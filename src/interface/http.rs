@@ -34,6 +34,7 @@ use axum::
 // `tower-http` is a collection of reusable HTTP middlewares.
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use tower_http::trace::TraceLayer;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use utoipa::OpenApi;
@@ -207,6 +208,10 @@ pub fn router_with(
         // then propagate it back on the response so logs can correlate.
         .layer(PropagateRequestIdLayer::new(x_request_id.clone()))
         .layer(SetRequestIdLayer::new(x_request_id, MakeRequestUuid))
+        // Structured tracing span per request: logs method, URI, status,
+        // and latency at INFO level. Correlates with request-id via
+        // the propagated x-request-id header set above.
+        .layer(TraceLayer::new_for_http())
 }
 
 // ---------- error mapping ----------------------------------------------
@@ -401,15 +406,22 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 #[utoipa::path(get, path = "/crew-leads", tag = "crew-leads",
+    params(PaginationQuery),
     responses((status = 200, description = "All crew leads", body = Vec<CrewLeadDto>)))]
-async fn list_crew_leads(State(state): State<AppState>) -> Json<Vec<CrewLeadDto>> {
-    // `State(state): State<AppState>` destructures the extractor in
-    // the parameter pattern: `state` is now `AppState` (= Arc<Mutex<World>>).
+async fn list_crew_leads(
+    State(state): State<AppState>,
+    Query(page): Query<PaginationQuery>,
+) -> Json<Vec<CrewLeadDto>> {
     let w = lock_world(&state);
-    // `Json(value)` wraps any `Serialize` value as a JSON response.
-    // `iter().map(...).collect()` is the standard Rust pipeline for
-    // transforming a slice into a Vec of converted items.
-    Json(w.crew_leads.list().iter().map(CrewLeadDto::from).collect())
+    Json(
+        w.crew_leads
+            .list()
+            .iter()
+            .skip(page.offset())
+            .take(page.limit())
+            .map(CrewLeadDto::from)
+            .collect(),
+    )
 }
 
 #[utoipa::path(put, path = "/crew-leads/{old_id}", tag = "crew-leads",
@@ -450,10 +462,22 @@ async fn replace_crew_lead(
 }
 
 #[utoipa::path(get, path = "/passengers", tag = "passengers",
+    params(PaginationQuery),
     responses((status = 200, body = Vec<PassengerDto>)))]
-async fn list_passengers(State(state): State<AppState>) -> Json<Vec<PassengerDto>> {
+async fn list_passengers(
+    State(state): State<AppState>,
+    Query(page): Query<PaginationQuery>,
+) -> Json<Vec<PassengerDto>> {
     let w = lock_world(&state);
-    Json(w.passengers.list().iter().map(PassengerDto::from).collect())
+    Json(
+        w.passengers
+            .list()
+            .iter()
+            .skip(page.offset())
+            .take(page.limit())
+            .map(PassengerDto::from)
+            .collect(),
+    )
 }
 
 #[utoipa::path(post, path = "/passengers", tag = "passengers",
@@ -519,10 +543,22 @@ async fn soft_delete_passenger(
 }
 
 #[utoipa::path(get, path = "/resources", tag = "resources",
+    params(PaginationQuery),
     responses((status = 200, body = Vec<ResourceDto>)))]
-async fn list_resources(State(state): State<AppState>) -> Json<Vec<ResourceDto>> {
+async fn list_resources(
+    State(state): State<AppState>,
+    Query(page): Query<PaginationQuery>,
+) -> Json<Vec<ResourceDto>> {
     let w = lock_world(&state);
-    Json(w.resources.list().iter().map(ResourceDto::from).collect())
+    Json(
+        w.resources
+            .list()
+            .iter()
+            .skip(page.offset())
+            .take(page.limit())
+            .map(ResourceDto::from)
+            .collect(),
+    )
 }
 
 #[utoipa::path(post, path = "/resources", tag = "resources",

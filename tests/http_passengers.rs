@@ -225,3 +225,16 @@ async fn create_passenger_oversized_name_returns_400() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["code"], "InvalidInput");
 }
+
+#[tokio::test]
+async fn list_passengers_pagination_offset_and_limit() {
+    let app = app();
+    // Seeded world has 3 passengers. offset=1&limit=1 should return exactly 1.
+    let (status, body) = send(
+        &app,
+        req(Method::GET, "/passengers?offset=1&limit=1", None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 1);
+}

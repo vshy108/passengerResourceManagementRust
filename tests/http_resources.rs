@@ -153,3 +153,16 @@ async fn delete_unknown_resource_returns_404() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["code"], "ResourceNotFound");
 }
+
+#[tokio::test]
+async fn list_resources_pagination_offset_and_limit() {
+    let app = app();
+    // Seeded world has 3 resources. offset=1&limit=1 should return exactly 1.
+    let (status, body) = send(
+        &app,
+        req(Method::GET, "/resources?offset=1&limit=1", None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 1);
+}
