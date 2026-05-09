@@ -967,13 +967,19 @@ async fn report_personal_history(
         (status = 409, body = ErrorBody)))]
 async fn add_crew_lead(
     State(state): State<AppState>,
-    _auth: AuthActor,
+    AuthActor(actor_id): AuthActor,
     Json(req): Json<AddCrewLeadReq>,
 ) -> Response {
+    let new_id = req.lead.id.clone();
     let mut w = write_world(&state);
     // CL-R2 — always 409 (`CrewLeadLimitReached`) by design.
     match w.crew_leads.add(req.lead.into()) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            // FIX: flush entity state so the new crew lead survives a restart.
+            w.flush_to_db();
+            tracing::info!(new_id = %new_id, actor = %actor_id, "crew lead added");
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => err_response_owned(&e),
     }
 }
@@ -986,13 +992,19 @@ async fn add_crew_lead(
         (status = 409, body = ErrorBody)))]
 async fn remove_crew_lead(
     State(state): State<AppState>,
-    _auth: AuthActor,
+    AuthActor(actor_id): AuthActor,
     Path(id): Path<String>,
 ) -> Response {
     let mut w = write_world(&state);
     // CL-R3 — always 409 (`CrewLeadMinimumBreached`) by design.
-    match w.crew_leads.remove(&CrewLeadId(id)) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+    match w.crew_leads.remove(&CrewLeadId(id.clone())) {
+        Ok(()) => {
+            // FIX: flush entity state so the removed crew lead does not
+            // reappear after a restart.
+            w.flush_to_db();
+            tracing::info!(removed_id = %id, actor = %actor_id, "crew lead removed");
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => err_response_owned(&e),
     }
 }
