@@ -286,8 +286,10 @@ In production-mode (`PRMS_DB_PATH` set), events persist to SQLite but entity sta
 
 Other known constraints:
 
-- State is held in a single mutex around `World` — will not scale beyond a handful of
-  concurrent writers without sharding or an external database.
+- State is held behind an `RwLock<World>` — concurrent reads (GET endpoints) proceed
+  without blocking each other; writes (POST/PUT/PATCH/DELETE) hold an exclusive lock.
+  This is fine for the demo load, but will not scale beyond a handful of concurrent
+  writers without sharding or an external database.
 - `POST /reset` is gated by `PRMS_ENABLE_RESET=true` — never enable in production.
 - Bearer tokens are resolved from `PRMS_API_KEYS` at startup; a real deployment would
   back this with a secrets manager and short-lived tokens.
