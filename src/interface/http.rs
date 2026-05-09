@@ -145,7 +145,7 @@ pub enum CorsOrigins {
 /// Equivalent to [`router_with`] using `CorsOrigins::Any` and reset disabled.
 /// Rate limiting is **disabled** — use this in tests to avoid IP-based throttling.
 pub fn router(state: AppState) -> Router {
-    router_with(state, CorsOrigins::Any, false, false)
+    router_with(state, CorsOrigins::Any, false, false, 10, 50)
 }
 
 /// Build the axum router with explicit CORS configuration.
@@ -154,20 +154,25 @@ pub fn router(state: AppState) -> Router {
 /// making it impossible to wipe state via the HTTP API. Set to `true`
 /// only for local dev / integration tests.
 ///
-/// `enable_rate_limit` — when `true` attaches a per-IP governor layer
-/// (50-burst, 10 req/s). Set to `false` in tests to avoid in-process
-/// requests all sharing the same loopback IP exhausting the bucket.
+/// `enable_rate_limit` — when `true` attaches a per-IP governor layer.
+/// Set to `false` in tests to avoid in-process requests all sharing the
+/// same loopback IP exhausting the bucket.
+///
+/// `rate_limit_rps` — tokens replenished per second per IP (default 10).
+///
+/// `rate_limit_burst` — initial token credit before throttling (default 50).
 ///
 /// # Panics
 ///
-/// Panics if the `GovernorConfigBuilder` produces an invalid configuration.
-/// This cannot happen with the hard-coded `per_second(10).burst_size(50)`
-/// values used here.
+/// Panics if the `GovernorConfigBuilder` produces an invalid configuration,
+/// i.e. if `rate_limit_rps` is 0.
 pub fn router_with(
     state: AppState,
     cors_origins: CorsOrigins,
     enable_reset: bool,
     enable_rate_limit: bool,
+    rate_limit_rps: u64,
+    rate_limit_burst: u32,
 ) -> Router {
     let cors = match cors_origins {
         CorsOrigins::Any => CorsLayer::new()
@@ -236,21 +241,21 @@ pub fn router_with(
         // 64 KiB body cap — every request DTO in this app is tiny.
         // Defends against accidental/malicious oversized payloads.
         .layer(DefaultBodyLimit::max(64 * 1024))
-        // Rate limiting: 50 req/s burst, replenishing 10 req/s per IP.
+        // Rate limiting: configurable per-IP token-bucket governor.
         // Defends against accidental/malicious high-frequency clients
         // (OWASP A04 — Insecure Design, resource exhaustion).
-        // `per_second(10)` = 1 token every 100 ms; `burst_size(50)` = initial
-        // credit so normal clients absorb short request bursts without throttling.
+        // `per_second(rps)` = 1 token every (1000/rps) ms.
+        // `burst_size(burst)` = initial credit for short legitimate bursts.
         // Disabled in tests: in-process requests all share the same loopback IP,
         // which would exhaust the token bucket and cause spurious test failures.
         .layer(tower::util::option_layer(if enable_rate_limit {
             Some(GovernorLayer::new(
                 std::sync::Arc::new(
                     GovernorConfigBuilder::default()
-                        .per_second(10)
-                        .burst_size(50)
+                        .per_second(rate_limit_rps)
+                        .burst_size(rate_limit_burst)
                         .finish()
-                        .expect("valid governor config"),
+                        .expect("valid governor config (rps must be non-zero)"),
                 ),
             ))
         } else {

@@ -64,7 +64,7 @@ pub fn app() -> Router {
     // FIX: router() now defaults to enable_reset=false; tests need /reset
     // Rate limiting disabled in tests: all in-process requests share the same
     // loopback IP, so the per-IP token bucket would be exhausted immediately.
-    router_with(state, CorsOrigins::Any, true, false)
+    router_with(state, CorsOrigins::Any, true, false, 10, 50)
 }
 
 /// Send a request through the router in-process and return (status, body).

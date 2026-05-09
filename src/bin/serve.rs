@@ -72,6 +72,20 @@ struct Args {
     /// When unset, ALL authenticated endpoints return 401.
     #[arg(long, env = "PRMS_API_KEYS")]
     api_keys: Option<String>,
+
+    /// Tokens replenished per second per IP for the rate limiter.
+    /// Lower values are stricter. Must be >= 1.
+    #[arg(long, env = "PRMS_RATE_LIMIT_RPS", default_value_t = 10)]
+    rate_limit_rps: u64,
+
+    /// Maximum initial token burst per IP before rate limiting kicks in.
+    #[arg(long, env = "PRMS_RATE_LIMIT_BURST", default_value_t = 50)]
+    rate_limit_burst: u32,
+
+    /// Log output format: `text` (human-readable, default) or `json`
+    /// (newline-delimited JSON for log aggregators such as Loki/Datadog).
+    #[arg(long, env = "PRMS_LOG_FORMAT", default_value = "text")]
+    log_format: String,
 }
 
 // `#[tokio::main]` is an attribute macro that wraps `main` in a tokio
@@ -82,17 +96,30 @@ struct Args {
 #[allow(clippy::too_many_lines)] // main() is setup-heavy by nature — extracting helpers would
                                   // just scatter one logical flow across many small functions.
 async fn main() -> ExitCode {
-    // RUST_LOG=info,tower_http=debug for verbose.
-    // tracing-subscriber installs a global logger. `EnvFilter` reads
-    // `RUST_LOG` (Rust's de-facto log-level env var). Falls back to
-    // "info" if that variable is missing or invalid.
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .init();
-
     // `Args::parse()` (from the Parser derive) reads argv + env and
     // exits with a friendly error if anything is malformed.
+    // Parsed BEFORE the subscriber so `--log-format` / `PRMS_LOG_FORMAT`
+    // can control how the subscriber is configured.
     let args = Args::parse();
+
+    // Initialise tracing-subscriber. RUST_LOG controls the filter level.
+    // `PRMS_LOG_FORMAT=json` switches to newline-delimited JSON for
+    // structured log aggregators (Loki, Datadog, CloudWatch).
+    // `text` (default) emits human-readable output for local dev.
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    match args.log_format.as_str() {
+        "json" => {
+            tracing_subscriber::fmt()
+                .json()
+                .with_env_filter(filter)
+                .init();
+        }
+        _ => {
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .init();
+        }
+    }
 
     // `.as_deref()` converts `Option<String>` -> `Option<&str>` so we
     // can match against string slices below.
@@ -172,13 +199,27 @@ async fn main() -> ExitCode {
         tracing::info!(count = api_keys.len(), "API keys loaded.");
     }
 
+    tracing::info!(
+        rps = args.rate_limit_rps,
+        burst = args.rate_limit_burst,
+        "Rate limiter configured (per IP)."
+    );
+
     let state = AppState::new(world, api_keys);
 
     // Build the router and add request tracing as the OUTERMOST layer
     // (logs every request/response pair).
     // FIX: rate limiting enabled in production (real server) but not in tests.
     // In tests all requests share the loopback IP, exhausting the bucket instantly.
-    let app = router_with(state, cors, args.enable_reset, true).layer(TraceLayer::new_for_http());
+    let app = router_with(
+        state,
+        cors,
+        args.enable_reset,
+        true,
+        args.rate_limit_rps,
+        args.rate_limit_burst,
+    )
+    .layer(TraceLayer::new_for_http());
     if args.enable_reset {
         tracing::warn!(
             "The /reset endpoint is enabled. This wipes all state and must \
