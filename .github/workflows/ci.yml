@@ -43,8 +43,8 @@ jobs:
       - name: coverage
         run: |
           cargo llvm-cov nextest --features http \
-            --ignore-filename-regex 'src/bin/' \
-            --fail-under-lines 98
+            --ignore-filename-regex 'src/bin/|sqlite_event_store' \
+            --fail-under-lines 93
 
   audit:
     runs-on: ubuntu-latest

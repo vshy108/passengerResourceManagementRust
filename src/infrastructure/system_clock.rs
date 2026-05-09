@@ -31,3 +31,26 @@ impl Clock for SystemClock {
         Timestamp(nanos as i64)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::ports::Clock as _;
+
+    #[test]
+    fn system_clock_now_returns_positive_timestamp() {
+        let t = SystemClock.now();
+        // Any value > 0 means the clock returned a real Unix-epoch nanos value
+        // (year 1970+). Timestamp(0) would indicate clock saturation on a
+        // misconfigured system — which would be a very different problem.
+        assert!(t.0 > 0, "SystemClock::now() returned a non-positive timestamp");
+    }
+
+    #[test]
+    fn system_clock_now_is_monotonically_non_decreasing() {
+        let t1 = SystemClock.now();
+        let t2 = SystemClock.now();
+        // t2 must be >= t1: wall-clock time never goes backwards within a process.
+        assert!(t2.0 >= t1.0, "second call returned an earlier timestamp than first");
+    }
+}
