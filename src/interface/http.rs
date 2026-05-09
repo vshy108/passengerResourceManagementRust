@@ -399,15 +399,30 @@ async fn health_ready(State(state): State<AppState>) -> Response {
             }),
         )
             .into_response(),
-        Ok(w) => Json(HealthReadyDto {
-            status: "ready".into(),
-            crew_leads: w.crew_leads.list().len(),
-            passengers_active: w.passengers.list().len(),
-            resources_active: w.resources.list().len(),
-            usage_events: w.access.sink().list().len(),
-            admin_events: w.audit_sink.snapshot().len(),
-        })
-        .into_response(),
+        Ok(w) => {
+            // P9: verify SQLite is reachable before reporting "ready".
+            // Returns 503 DatabaseUnreachable if the DB file is gone or
+            // the connection is broken — lets k8s stop routing traffic.
+            if let Some(false) = w.ping_db() {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ErrorBody {
+                        error: "database unreachable".into(),
+                        code: "DatabaseUnreachable".into(),
+                    }),
+                )
+                    .into_response();
+            }
+            Json(HealthReadyDto {
+                status: "ready".into(),
+                crew_leads: w.crew_leads.list().len(),
+                passengers_active: w.passengers.list().len(),
+                resources_active: w.resources.list().len(),
+                usage_events: w.access.sink().list().len(),
+                admin_events: w.audit_sink.snapshot().len(),
+            })
+            .into_response()
+        }
     }
 }
 
@@ -499,11 +514,13 @@ async fn replace_crew_lead(
     if let Err(msg) = req.new_lead.validate() {
         return bad_request(msg);
     }
+    // Capture IDs for tracing before they are moved into CrewLeadId wrappers.
+    let new_id_for_log = req.new_lead.id.clone();
     // `&mut w` because `replace_audited` mutates the service state.
     let mut w = write_world(&state);
     match w.crew_leads.replace_audited(
-        &CrewLeadId(actor_id),
-        &CrewLeadId(old_id),
+        &CrewLeadId(actor_id.clone()),
+        &CrewLeadId(old_id.clone()),
         // `req.new_lead.into()` calls `From<CrewLeadDto> for CrewLead`.
         req.new_lead.into(),
     ) {
@@ -512,6 +529,7 @@ async fn replace_crew_lead(
         // for successful mutations with no body to return.
         Ok(()) => {
             w.flush_to_db();
+            tracing::info!(old_id = %old_id, new_id = %new_id_for_log, actor = %actor_id, "crew lead replaced");
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => err_response_owned(&e),
@@ -552,13 +570,14 @@ async fn create_passenger(
         return bad_request(msg);
     }
     let mut w = write_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(actor_id));
+    let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
     match w
         .passengers
-        .create(&actor, PassengerId(req.id), req.name, Tier::from(req.tier))
+        .create(&actor, PassengerId(req.id.clone()), req.name, Tier::from(req.tier))
     {
         Ok(p) => {
             w.flush_to_db();
+            tracing::info!(passenger_id = %p.id.0, tier = ?p.tier, actor = %actor_id, "passenger created");
             (StatusCode::CREATED, Json(PassengerDto::from(&p))).into_response()
         }
         Err(e) => err_response_owned(&e),
@@ -576,13 +595,14 @@ async fn change_passenger_tier(
     Json(req): Json<ChangeTierReq>,
 ) -> Response {
     let mut w = write_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(actor_id));
+    let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
     match w
         .passengers
-        .change_tier(&actor, &PassengerId(id), Tier::from(req.tier))
+        .change_tier(&actor, &PassengerId(id.clone()), Tier::from(req.tier))
     {
         Ok(()) => {
             w.flush_to_db();
+            tracing::info!(passenger_id = %id, tier = ?req.tier, actor = %actor_id, "passenger tier changed");
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => err_response_owned(&e),
@@ -598,10 +618,11 @@ async fn soft_delete_passenger(
     AuthActor(actor_id): AuthActor,
 ) -> Response {
     let mut w = write_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(actor_id));
-    match w.passengers.soft_delete(&actor, &PassengerId(id)) {
+    let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
+    match w.passengers.soft_delete(&actor, &PassengerId(id.clone())) {
         Ok(()) => {
             w.flush_to_db();
+            tracing::info!(passenger_id = %id, actor = %actor_id, "passenger soft-deleted");
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => err_response_owned(&e),
@@ -642,7 +663,7 @@ async fn create_resource(
         return bad_request(msg);
     }
     let mut w = write_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(actor_id));
+    let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
     match w.resources.create(
         &actor,
         ResourceId(req.id),
@@ -652,6 +673,7 @@ async fn create_resource(
     ) {
         Ok(r) => {
             w.flush_to_db();
+            tracing::info!(resource_id = %r.id.0, min_tier = ?r.min_tier, actor = %actor_id, "resource created");
             (StatusCode::CREATED, Json(ResourceDto::from(&r))).into_response()
         }
         Err(e) => err_response_owned(&e),
@@ -669,13 +691,14 @@ async fn change_resource_min_tier(
     Json(req): Json<ChangeTierReq>,
 ) -> Response {
     let mut w = write_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(actor_id));
+    let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
     match w
         .resources
-        .change_min_tier(&actor, &ResourceId(id), Tier::from(req.tier))
+        .change_min_tier(&actor, &ResourceId(id.clone()), Tier::from(req.tier))
     {
         Ok(()) => {
             w.flush_to_db();
+            tracing::info!(resource_id = %id, min_tier = ?req.tier, actor = %actor_id, "resource min-tier changed");
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => err_response_owned(&e),
@@ -691,10 +714,11 @@ async fn soft_delete_resource(
     AuthActor(actor_id): AuthActor,
 ) -> Response {
     let mut w = write_world(&state);
-    let actor = Actor::CrewLead(CrewLeadId(actor_id));
-    match w.resources.soft_delete(&actor, &ResourceId(id)) {
+    let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
+    match w.resources.soft_delete(&actor, &ResourceId(id.clone())) {
         Ok(()) => {
             w.flush_to_db();
+            tracing::info!(resource_id = %id, actor = %actor_id, "resource soft-deleted");
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => err_response_owned(&e),
@@ -716,7 +740,7 @@ async fn use_resource(
         return bad_request(msg);
     }
     let mut w = write_world(&state);
-    let actor = Actor::Passenger(PassengerId(actor_id));
+    let actor = Actor::Passenger(PassengerId(actor_id.clone()));
     // BORROW SPLITTING: `access.use_resource` needs `&mut self` on
     // `access` AND immutable borrows on `passengers` + `resources`,
     // all from the same `World`. The borrow checker won't let us call
@@ -732,7 +756,15 @@ async fn use_resource(
         ..
     } = &mut *w;
     match access.use_resource(&actor, passengers, resources, &ResourceId(req.resource_id)) {
-        Ok(ev) => (StatusCode::OK, Json(UsageEventDto::from(&ev))).into_response(),
+        Ok(ev) => {
+            tracing::info!(
+                passenger_id = %actor_id,
+                resource_id = %ev.resource_id.0,
+                outcome = ?ev.outcome,
+                "resource access recorded"
+            );
+            (StatusCode::OK, Json(UsageEventDto::from(&ev))).into_response()
+        }
         Err(e) => err_response_owned(&e),
     }
 }
