@@ -7,7 +7,8 @@
 
 mod http_common;
 
-use axum::http::{Method, StatusCode};
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode};
 use serde_json::json;
 
 use http_common::{CL_TOKEN, app, auth_req, req, send};
@@ -237,4 +238,75 @@ async fn list_passengers_pagination_offset_and_limit() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn create_passenger_idempotency_key_deduplicates_retry() {
+    // A single app instance shares AppState (Arc<RwLock<World>> + idempotency cache)
+    // across cloned Router calls — so the second request sees the cached response.
+    let app = app();
+    let payload = json!({"id": "ps-idem", "name": "Idem Test", "tier": "Silver"});
+
+    // Helper that builds a POST /passengers request with an Idempotency-Key header.
+    let make_req = || {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/passengers")
+            .header("authorization", format!("Bearer {CL_TOKEN}"))
+            .header("content-type", "application/json")
+            .header("idempotency-key", "idem-key-ps-idem")
+            .body(Body::from(
+                serde_json::to_vec(&payload).expect("json"),
+            ))
+            .expect("request")
+    };
+
+    // First call — creates the passenger and caches the response.
+    let (s1, b1) = send(&app, make_req()).await;
+    assert_eq!(s1, StatusCode::CREATED);
+    assert_eq!(b1["id"], "ps-idem");
+
+    // Second call with the SAME key — must return the cached 201, not 409 Conflict.
+    // This proves the idempotency cache is checked before domain logic runs.
+    let (s2, b2) = send(&app, make_req()).await;
+    assert_eq!(s2, StatusCode::CREATED, "retry with same key must return 201, not 409");
+    assert_eq!(b1, b2, "retry response body must be identical to first response");
+
+    // Confirm only ONE passenger was created (domain logic ran exactly once).
+    let (_, list) = send(&app, req(Method::GET, "/passengers", None)).await;
+    assert_eq!(
+        list.as_array().unwrap().len(),
+        4, // 3 seeded + 1 created via idempotent POST
+        "duplicate domain execution would yield 5 rows"
+    );
+}
+
+#[tokio::test]
+async fn create_passenger_different_idempotency_key_is_independent() {
+    // Two requests with DIFFERENT idempotency keys must be treated as two
+    // separate operations — the second should get 409 (duplicate passenger id).
+    let app = app();
+    let payload = json!({"id": "ps-idem2", "name": "Idem Test 2", "tier": "Gold"});
+
+    let make_req = |key: &str| {
+        let key = key.to_owned();
+        Request::builder()
+            .method(Method::POST)
+            .uri("/passengers")
+            .header("authorization", format!("Bearer {CL_TOKEN}"))
+            .header("content-type", "application/json")
+            .header("idempotency-key", key)
+            .body(Body::from(
+                serde_json::to_vec(&payload).expect("json"),
+            ))
+            .expect("request")
+    };
+
+    let (s1, _) = send(&app, make_req("key-a")).await;
+    assert_eq!(s1, StatusCode::CREATED);
+
+    // Different key → cache miss → domain logic runs → duplicate passenger → 409.
+    let (s2, body) = send(&app, make_req("key-b")).await;
+    assert_eq!(s2, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "PassengerAlreadyExists");
 }
