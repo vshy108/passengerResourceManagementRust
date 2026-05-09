@@ -175,6 +175,18 @@ fn ps_s9_can_recreate_id_after_soft_delete() {
     assert_eq!(svc.get(&PassengerId::from("p1")).unwrap().tier, Tier::Gold);
 }
 
+// PS-S11: soft_delete on unknown id ----------------------------------------
+
+#[test]
+fn ps_s11_soft_delete_unknown_id_returns_not_found() {
+    // FIX: the `?` error branch on `.ok_or(DomainError::PassengerNotFound)`
+    // inside `soft_delete` was never exercised (passenger_service.rs line 144)
+    // because every prior test only deleted passengers that existed.
+    let mut svc = svc();
+    let res = svc.soft_delete(&admin(), &PassengerId::from("zzz"));
+    assert_eq!(res, Err(DomainError::PassengerNotFound));
+}
+
 // -- Listing (PS-S10) -------------------------------------------------
 
 #[test]
