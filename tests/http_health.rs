@@ -187,3 +187,38 @@ async fn metrics_returns_prometheus_text() {
     assert!(text.contains("prms_resources_active_total 3"));
     assert!(text.contains("prms_usage_events_total 0"));
 }
+
+#[tokio::test]
+async fn metrics_counts_allowed_and_denied_after_access_events() {
+    let app = app();
+    // FIX: the `allowed`/`denied` filter closures in `metrics()` (http.rs
+    // lines 483-484) are only executed when there are usage events. Drive
+    // one allowed + one denied event so both filter arms execute.
+    let _ = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/access",
+            "test-ps-001",
+            Some(json!({"resource_id": "res-lounge"})),
+        ),
+    )
+    .await;
+    let _ = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/access",
+            "test-ps-001",
+            Some(json!({"resource_id": "res-bridge"})),
+        ),
+    )
+    .await;
+    let r = req(Method::GET, "/metrics", None);
+    let res = app.clone().oneshot(r).await.unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let text = std::str::from_utf8(&bytes).unwrap();
+    assert!(text.contains("prms_usage_events_total 2"));
+    assert!(text.contains("prms_usage_events_allowed_total 1"));
+    assert!(text.contains("prms_usage_events_denied_total 1"));
+}

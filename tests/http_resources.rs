@@ -5,7 +5,8 @@
 
 mod http_common;
 
-use axum::http::{Method, StatusCode};
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode};
 use serde_json::json;
 
 use http_common::{CL_TOKEN, app, auth_req, req, send};
@@ -324,4 +325,39 @@ async fn create_resource_diamond_min_tier_roundtrip() {
     assert_eq!(get_status, StatusCode::OK);
     // `min_tier` serialised as `TierDto::Diamond` must round-trip back to "Diamond".
     assert_eq!(get_body["min_tier"], "Diamond");
+}
+
+#[tokio::test]
+async fn create_resource_idempotency_key_deduplicates_retry() {
+    let app = app();
+    // FIX: exercises the idempotency cache-hit path in `create_resource`
+    // (http.rs lines 735-738): when the same Idempotency-Key is sent twice,
+    // the second call must return the cached 201 without running domain logic.
+    let payload = json!({"id": "res-idem", "name": "Idem Zone", "category": "lounge", "min_tier": "Silver"});
+
+    let make_req = || {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/resources")
+            .header("authorization", format!("Bearer {CL_TOKEN}"))
+            .header("content-type", "application/json")
+            .header("idempotency-key", "idem-key-res-idem")
+            .body(Body::from(serde_json::to_vec(&payload).expect("json")))
+            .expect("request")
+    };
+
+    // First call — creates the resource and caches the response.
+    let (s1, b1) = send(&app, make_req()).await;
+    assert_eq!(s1, StatusCode::CREATED);
+    assert_eq!(b1["id"], "res-idem");
+
+    // Second call with the SAME key — must return cached 201, not 409 Conflict.
+    // This exercises the `idempotency_get` cache-hit return branch (lines 735-738).
+    let (s2, b2) = send(&app, make_req()).await;
+    assert_eq!(s2, StatusCode::CREATED, "retry with same key must return 201");
+    assert_eq!(b1, b2, "retry response body must be identical to first response");
+
+    // Confirm only ONE resource was created (domain logic ran exactly once).
+    let (_, list) = send(&app, req(Method::GET, "/resources", None)).await;
+    assert_eq!(list.as_array().unwrap().len(), 4); // 3 seeded + 1
 }
