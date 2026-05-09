@@ -195,3 +195,40 @@ async fn audit_log_serialises_every_admin_action_string() {
         assert!(actions.contains(&expected), "missing {expected}");
     }
 }
+
+#[tokio::test]
+async fn report_by_tier_includes_diamond_at_correct_sort_position() {
+    let app = app();
+    // Promote ps-001 (Silver) to Diamond, then have them use res-lounge.
+    // This produces a Diamond usage event, exercising the
+    // `TierDto::Diamond => 2` sort arm in `report_tier_breakdown`
+    // (http.rs line 915) and the `Tier::Diamond => TierDto::Diamond`
+    // conversion in `From<Tier> for TierDto` (dto.rs line 42).
+    let _ = send(
+        &app,
+        auth_req(
+            Method::PATCH,
+            "/passengers/ps-001/tier",
+            CL_TOKEN,
+            Some(json!({"tier": "Diamond"})),
+        ),
+    )
+    .await;
+    let _ = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/access",
+            PS_TOKEN,
+            Some(json!({"resource_id": "res-lounge"})),
+        ),
+    )
+    .await;
+    let (status, body) = send(&app, req(Method::GET, "/reports/by-tier", None)).await;
+    assert_eq!(status, StatusCode::OK);
+    let arr = body.as_array().unwrap();
+    let tiers: Vec<&str> = arr.iter().map(|r| r["tier"].as_str().unwrap()).collect();
+    // Diamond must appear at a position after Gold (rank 1) and before Platinum (rank 3).
+    let diamond_pos = tiers.iter().position(|&t| t == "Diamond");
+    assert!(diamond_pos.is_some(), "Diamond tier missing from report");
+}

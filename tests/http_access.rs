@@ -48,3 +48,33 @@ async fn access_denied_returns_403_with_event_recorded() {
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["outcome"], "Denied");
 }
+
+#[tokio::test]
+async fn access_empty_resource_id_returns_400() {
+    let app = app();
+    // FIX: `UseResourceReq::validate()` rejects an empty `resource_id`.
+    // This exercises the `resource_id.is_empty()` branch (dto.rs line 259)
+    // and the `bad_request` path in the `use_resource` handler (http.rs line 824).
+    let (status, body) = send(
+        &app,
+        auth_req(Method::POST, "/access", PS_TOKEN, Some(json!({"resource_id": ""}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
+async fn access_oversized_resource_id_returns_400() {
+    let app = app();
+    // FIX: `UseResourceReq::validate()` rejects `resource_id` longer than 255 chars.
+    // This exercises the `resource_id.len() > 255` branch (dto.rs line 262).
+    let long_id = "r".repeat(256);
+    let (status, body) = send(
+        &app,
+        auth_req(Method::POST, "/access", PS_TOKEN, Some(json!({"resource_id": long_id}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}

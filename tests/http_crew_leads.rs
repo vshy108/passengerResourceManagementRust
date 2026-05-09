@@ -107,3 +107,63 @@ async fn list_crew_leads_pagination_offset_and_limit() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn replace_crew_lead_empty_new_name_returns_400() {
+    let app = app();
+    // FIX: `CrewLeadDto::validate()` rejects an empty `name`.
+    // This exercises the `name.is_empty()` branch (dto.rs line 84) and
+    // the `bad_request` path in the `replace_crew_lead` handler (http.rs line 561).
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::PUT,
+            "/crew-leads/cl-aria",
+            CL_TOKEN,
+            Some(json!({"new_lead": {"id": "cl-aria2", "name": ""}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
+async fn replace_crew_lead_oversized_new_id_returns_400() {
+    let app = app();
+    // FIX: `CrewLeadDto::validate()` rejects `id` longer than 255 chars.
+    // This exercises the `id.len() > 255` branch (dto.rs line 81).
+    let long_id = "x".repeat(256);
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::PUT,
+            "/crew-leads/cl-aria",
+            CL_TOKEN,
+            Some(json!({"new_lead": {"id": long_id, "name": "X"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
+async fn replace_crew_lead_oversized_new_name_returns_400() {
+    let app = app();
+    // FIX: `CrewLeadDto::validate()` rejects `name` longer than 255 chars.
+    // This exercises the `name.len() > 255` branch (dto.rs line 87).
+    let long_name = "n".repeat(256);
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::PUT,
+            "/crew-leads/cl-aria",
+            CL_TOKEN,
+            Some(json!({"new_lead": {"id": "cl-x", "name": long_name}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}

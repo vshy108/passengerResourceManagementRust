@@ -166,3 +166,104 @@ async fn list_resources_pagination_offset_and_limit() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn create_resource_empty_category_returns_400() {
+    let app = app();
+    // FIX: `CreateResourceReq::validate()` rejects empty category.
+    // This exercises the `category.is_empty()` branch (dto.rs line 233).
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/resources",
+            CL_TOKEN,
+            Some(json!({"id": "res-x", "name": "X", "category": "", "min_tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
+async fn create_resource_oversized_name_returns_400() {
+    let app = app();
+    // FIX: `CreateResourceReq::validate()` rejects names longer than 255 chars.
+    // This exercises the `name.len() > 255` branch (dto.rs line 227).
+    let long_name = "a".repeat(256);
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/resources",
+            CL_TOKEN,
+            Some(json!({"id": "res-x", "name": long_name, "category": "lounge", "min_tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
+async fn create_resource_oversized_category_returns_400() {
+    let app = app();
+    // FIX: `CreateResourceReq::validate()` rejects categories longer than 255 chars.
+    // This exercises the `category.len() > 255` branch (dto.rs line 236).
+    let long_cat = "c".repeat(256);
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/resources",
+            CL_TOKEN,
+            Some(json!({"id": "res-x", "name": "X", "category": long_cat, "min_tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
+async fn create_resource_platinum_min_tier_accepted() {
+    let app = app();
+    // Exercises the `TierDto::Platinum => Tier::Platinum` branch (dto.rs line 53)
+    // which is triggered when parsing a "Platinum" tier from a JSON request body.
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/resources",
+            CL_TOKEN,
+            Some(json!({"id": "res-plat", "name": "Plat Zone", "category": "lounge", "min_tier": "Platinum"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["min_tier"], "Platinum");
+}
+
+#[tokio::test]
+async fn create_resource_diamond_min_tier_roundtrip() {
+    let app = app();
+    // Exercises the `Tier::Diamond => TierDto::Diamond` branch (dto.rs line 42)
+    // which is triggered when converting a domain `Tier::Diamond` value into a DTO
+    // for JSON serialisation (e.g. in the GET /resources response body).
+    let (status, _) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/resources",
+            CL_TOKEN,
+            Some(json!({"id": "res-dia", "name": "Diamond Lounge", "category": "lounge", "min_tier": "Diamond"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (get_status, get_body) = send(&app, req(Method::GET, "/resources/res-dia", None)).await;
+    assert_eq!(get_status, StatusCode::OK);
+    // `min_tier` serialised as `TierDto::Diamond` must round-trip back to "Diamond".
+    assert_eq!(get_body["min_tier"], "Diamond");
+}

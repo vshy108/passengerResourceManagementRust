@@ -35,7 +35,6 @@ impl Clock for SystemClock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::ports::Clock as _;
 
     #[test]
     fn system_clock_now_returns_positive_timestamp() {
