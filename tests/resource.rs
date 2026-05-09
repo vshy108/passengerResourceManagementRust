@@ -180,3 +180,14 @@ fn rs_s12_soft_delete_unknown_id_returns_not_found() {
     let res = svc.soft_delete(&admin(), &ResourceId::from("zzz"));
     assert_eq!(res, Err(DomainError::ResourceNotFound));
 }
+
+#[test]
+fn rs_s13_passenger_actor_cannot_soft_delete() {
+    // FIX: the `?` early-return branch on `require_crew_lead(actor)?` at
+    // resource_service.rs line 122 is the UnauthorizedActor path.
+    // No existing test called soft_delete with a non-crew-lead actor.
+    let mut svc = svc();
+    create(&mut svc, "r1", Tier::Silver);
+    let res = svc.soft_delete(&passenger_actor(), &ResourceId::from("r1"));
+    assert_eq!(res, Err(DomainError::UnauthorizedActor));
+}

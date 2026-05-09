@@ -187,6 +187,18 @@ fn ps_s11_soft_delete_unknown_id_returns_not_found() {
     assert_eq!(res, Err(DomainError::PassengerNotFound));
 }
 
+#[test]
+fn ps_s12_passenger_actor_cannot_soft_delete() {
+    // FIX: the `?` early-return branch on `require_crew_lead(actor)?` at
+    // passenger_service.rs line 144 is the UnauthorizedActor path.
+    // No existing test called soft_delete with a non-crew-lead actor.
+    let mut svc = svc();
+    svc.create(&admin(), PassengerId::from("p1"), "Alice".into(), Tier::Silver)
+        .unwrap();
+    let res = svc.soft_delete(&passenger_actor(), &PassengerId::from("p1"));
+    assert_eq!(res, Err(DomainError::UnauthorizedActor));
+}
+
 // -- Listing (PS-S10) -------------------------------------------------
 
 #[test]
