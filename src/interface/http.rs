@@ -13,7 +13,8 @@
 // Standard-library threading primitives. See in_memory_admin_event_sink
 // for the Arc<Mutex<...>> pattern explanation.
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // `subtle::ConstantTimeEq` provides timing-safe byte comparison so an
 // attacker cannot infer token prefixes from response latency (OWASP A07).
@@ -24,6 +25,7 @@ use subtle::ConstantTimeEq;
 use axum::
     {
     Json, Router,
+    body::Bytes,
     // Axum *extractors* — types that pull data out of a request:
     //   Path<T>   -> URL path parameters
     //   Query<T>  -> query-string parameters (?foo=bar)
@@ -66,11 +68,25 @@ use crate::interface::dto::{
 /// An `RwLock` is used instead of a `Mutex` so concurrent read-only requests
 /// (list, get, reports, audit) can proceed in parallel. Only mutating handlers
 /// need an exclusive write lock, which they hold for the minimum duration.
+/// Cached idempotency response: raw body bytes, status code, and Unix-second expiry.
+struct IdempotencyEntry {
+    status: StatusCode,
+    body: Bytes,
+    /// Unix timestamp (seconds) after which this entry may be evicted.
+    expires_at: u64,
+}
+
+/// In-memory idempotency cache.  Keys are the client-supplied `Idempotency-Key` values.
+/// Entries expire after `IDEMPOTENCY_TTL_SECS` seconds.
+const IDEMPOTENCY_TTL_SECS: u64 = 600; // 10 minutes
+
 #[derive(Clone)]
 pub struct AppState {
     world: Arc<RwLock<World>>,
     /// Maps bearer token → actor ID string. Immutable after construction.
     api_keys: Arc<HashMap<String, String>>,
+    /// Idempotency cache: `Idempotency-Key` header → cached response.
+    idempotency: Arc<Mutex<HashMap<String, IdempotencyEntry>>>,
 }
 
 impl AppState {
@@ -78,8 +94,36 @@ impl AppState {
         Self {
             world: Arc::new(RwLock::new(world)),
             api_keys: Arc::new(api_keys),
+            idempotency: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+}
+
+/// Returns the current Unix timestamp in seconds (used for idempotency TTL).
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Look up an idempotency key. Returns the cached response if present and unexpired.
+/// Evicts stale entries opportunistically on every lookup.
+fn idempotency_get(state: &AppState, key: &str) -> Option<Response> {
+    let mut cache = state.idempotency.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let now = now_secs();
+    // Opportunistic eviction of expired entries to bound memory growth.
+    cache.retain(|_, v| v.expires_at > now);
+    cache.get(key).map(|e| {
+        (e.status, e.body.clone()).into_response()
+    })
+}
+
+/// Store a response body under an idempotency key for `IDEMPOTENCY_TTL_SECS`.
+/// Only called after a successful (2xx) domain operation.
+fn idempotency_put(state: &AppState, key: String, status: StatusCode, body: Bytes) {
+    let mut cache = state.idempotency.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache.insert(key, IdempotencyEntry { status, body, expires_at: now_secs() + IDEMPOTENCY_TTL_SECS });
 }
 
 /// CORS origin policy. `Any` accepts any origin (dev/demo default);
@@ -563,11 +607,20 @@ async fn list_passengers(
 async fn create_passenger(
     State(state): State<AppState>,
     AuthActor(actor_id): AuthActor,
+    headers: axum::http::HeaderMap,
     Json(req): Json<CreatePassengerReq>,
 ) -> Response {
     // Validate string lengths at the boundary before touching domain logic.
     if let Err(msg) = req.validate() {
         return bad_request(msg);
+    }
+    // Idempotency: return the cached response if the key was seen before.
+    let idem_key = headers
+        .get("idempotency-key")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    if let Some(cached) = idem_key.as_deref().and_then(|k| idempotency_get(&state, k)) {
+        return cached;
     }
     let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
@@ -578,7 +631,12 @@ async fn create_passenger(
         Ok(p) => {
             w.flush_to_db();
             tracing::info!(passenger_id = %p.id.0, tier = ?p.tier, actor = %actor_id, "passenger created");
-            (StatusCode::CREATED, Json(PassengerDto::from(&p))).into_response()
+            let dto = PassengerDto::from(&p);
+            let body = serde_json::to_vec(&dto).unwrap_or_default();
+            if let Some(key) = idem_key {
+                idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body.clone()));
+            }
+            (StatusCode::CREATED, Json(dto)).into_response()
         }
         Err(e) => err_response_owned(&e),
     }
@@ -656,11 +714,20 @@ async fn list_resources(
 async fn create_resource(
     State(state): State<AppState>,
     AuthActor(actor_id): AuthActor,
+    headers: axum::http::HeaderMap,
     Json(req): Json<CreateResourceReq>,
 ) -> Response {
     // Validate string lengths at the boundary before touching domain logic.
     if let Err(msg) = req.validate() {
         return bad_request(msg);
+    }
+    // Idempotency: return the cached response if the key was seen before.
+    let idem_key = headers
+        .get("idempotency-key")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    if let Some(cached) = idem_key.as_deref().and_then(|k| idempotency_get(&state, k)) {
+        return cached;
     }
     let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
@@ -674,7 +741,12 @@ async fn create_resource(
         Ok(r) => {
             w.flush_to_db();
             tracing::info!(resource_id = %r.id.0, min_tier = ?r.min_tier, actor = %actor_id, "resource created");
-            (StatusCode::CREATED, Json(ResourceDto::from(&r))).into_response()
+            let dto = ResourceDto::from(&r);
+            let body = serde_json::to_vec(&dto).unwrap_or_default();
+            if let Some(key) = idem_key {
+                idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body.clone()));
+            }
+            (StatusCode::CREATED, Json(dto)).into_response()
         }
         Err(e) => err_response_owned(&e),
     }

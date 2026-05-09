@@ -1,0 +1,28 @@
+# Caddyfile — automatic HTTPS via Let's Encrypt.
+#
+# Usage:
+#   Set the PRMS_DOMAIN env var (e.g. "prms.example.com") in docker-compose.yml.
+#   Caddy handles certificate acquisition, renewal, and HTTPS termination.
+#   The prms container is bound to 127.0.0.1 inside the Docker network only;
+#   Caddy is the sole external entry point.
+#
+# For local development without a domain, replace the hostname with
+# "localhost" — Caddy will use a self-signed certificate trusted by
+# its own CA (run `caddy trust` once to install it).
+
+{$PRMS_DOMAIN} {
+    # Proxy all requests to the PRMS backend on the internal Docker network.
+    reverse_proxy prms:8080
+
+    # Security headers beyond what the Rust layer already sets.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        -Server
+    }
+
+    # Log requests in JSON for structured log ingestion.
+    log {
+        output stdout
+        format json
+    }
+}

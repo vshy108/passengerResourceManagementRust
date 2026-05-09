@@ -74,3 +74,43 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [rust, web]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: build release binary
+        run: cargo build --release --features http --bin serve
+      - name: start PRMS server
+        run: |
+          PRMS_API_KEYS='cl-aria-e2e-token:cl-aria,ps-001-token:ps-001' \
+          PRMS_ENABLE_RESET=true \
+          ./target/release/serve &
+          # Wait until the health endpoint responds.
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8080/health && break || sleep 1
+          done
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: "web/.nvmrc"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+      - name: install dependencies
+        working-directory: web
+        run: npm ci
+      - name: install Playwright browsers
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: run E2E tests
+        working-directory: web
+        run: npm run test:e2e
+      - name: upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7

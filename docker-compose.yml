@@ -6,15 +6,20 @@ services:
       context: .
       dockerfile: Dockerfile
     image: prms:latest
+    # FIX: bind to 127.0.0.1 only — Caddy is the sole external entry point.
+    # Exposing 8080 directly to the host bypasses TLS and the rate-limiter
+    # middleware that is only applied in the production binary.
+    # Remove this ports block entirely in production; keep for local dev only.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       # REQUIRED: set real tokens before deploying.
       PRMS_API_KEYS: "crew-lead-token:cl-aria,passenger-token:ps-001"
+      # REQUIRED for Caddy HTTPS: set your public hostname.
+      # PRMS_CORS_ORIGINS must match this domain (no trailing slash).
+      # PRMS_CORS_ORIGINS: "https://prms.example.com"
       # Optional: persist events to a named volume.
       # PRMS_DB_PATH: /data/prms.db
-      # Optional: restrict CORS to your frontend origin.
-      # PRMS_CORS_ORIGINS: "http://localhost:5173"
     # volumes:
     #   - prms-data:/data
     restart: unless-stopped
@@ -25,5 +30,26 @@ services:
       retries: 3
       start_period: 5s
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3 (QUIC)
+    environment:
+      # Set this to your public hostname (e.g. prms.example.com).
+      # Caddy uses it for automatic Let's Encrypt certificate acquisition.
+      PRMS_DOMAIN: "${PRMS_DOMAIN:-localhost}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - prms
+
+volumes:
+  caddy-data:
+  caddy-config:
 # volumes:
 #   prms-data:
