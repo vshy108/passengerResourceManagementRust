@@ -16,6 +16,8 @@ use crate::domain::resource::ResourceId;
 use crate::domain::tier::Tier;
 use crate::domain::usage_event::UsageEvent;
 use crate::infrastructure::fake_clock::FakeClock;
+#[cfg(feature = "http")]
+use crate::infrastructure::system_clock::SystemClock;
 use crate::infrastructure::in_memory_admin_event_sink::InMemoryAdminEventSink;
 use crate::infrastructure::in_memory_usage_event_sink::InMemoryUsageEventSink;
 #[cfg(feature = "http")]
@@ -189,19 +191,20 @@ pub fn build_world_with_sqlite(db_path: &str) -> Result<World, BuildError> {
 
         // Restore crew leads WITHOUT emitting bootstrap events (they are
         // already in the admin event log from the original run).
+        // FIX: SystemClock ensures future mutations carry real wall-clock timestamps.
         let crew_leads = CrewLeadService::restore(leads)
             .map_err(BuildError::Domain)?
-            .with_future_audit(Box::new(FakeClock::default()), Box::new(audit_sink.clone()));
+            .with_future_audit(Box::new(SystemClock), Box::new(audit_sink.clone()));
 
-        let passengers = PassengerService::new(FakeClock::default())
+        let passengers = PassengerService::new(FakeClock::starting_at_system_time())
             .with_audit(Box::new(audit_sink.clone()))
             .with_preloaded(active_pax, deleted_pax);
 
-        let resources = ResourceService::new(FakeClock::default())
+        let resources = ResourceService::new(FakeClock::starting_at_system_time())
             .with_audit(Box::new(audit_sink.clone()))
             .with_preloaded(active_res, deleted_res);
 
-        let access = AccessService::new(FakeClock::default(), usage_sink);
+        let access = AccessService::new(FakeClock::starting_at_system_time(), usage_sink);
 
         Ok(World {
             crew_leads,

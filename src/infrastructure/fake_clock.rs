@@ -6,6 +6,7 @@
 // inner i64. The alternative would be `Mutex<i64>` — heavier and not
 // needed for a simple counter.
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::time::SystemTime;
 
 use crate::application::ports::Clock;
 use crate::domain::timestamp::Timestamp;
@@ -26,6 +27,28 @@ impl FakeClock {
         Self {
             next: AtomicI64::new(start),
         }
+    }
+
+    /// Seed from the current wall-clock time (nanoseconds since Unix epoch).
+    ///
+    /// Used in production restore paths so that mutations after a restart
+    /// carry approximately-correct timestamps. The clock is still monotonic
+    /// within a session (increments by 1 ns per call), but starts close to
+    /// the real current time instead of epoch-zero.
+    ///
+    /// # Panics
+    /// Only if the system clock is set before the Unix epoch (1970-01-01),
+    /// which saturates to 0 rather than panicking.
+    #[must_use]
+    pub fn starting_at_system_time() -> Self {
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            // FIX: saturate instead of panic if clock is misconfigured.
+            .unwrap_or_default()
+            .as_nanos();
+        // Saturating cast: u128 nanos won't overflow i64 until year 2262.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        Self::starting_at(nanos as i64)
     }
 }
 
