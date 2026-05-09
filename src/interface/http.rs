@@ -15,6 +15,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+// `subtle::ConstantTimeEq` provides timing-safe byte comparison so an
+// attacker cannot infer token prefixes from response latency (OWASP A07).
+use subtle::ConstantTimeEq;
+
 // `axum` is the HTTP framework. The `use { a, b, c }` syntax imports
 // multiple items from one path in a single statement.
 use axum::
@@ -34,6 +38,7 @@ use axum::
 // `tower-http` is a collection of reusable HTTP middlewares.
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
@@ -216,6 +221,22 @@ pub fn router_with(
         // and latency at INFO level. Correlates with request-id via
         // the propagated x-request-id header set above.
         .layer(TraceLayer::new_for_http())
+        // FIX: security response headers (OWASP A05 — Security Misconfiguration).
+        // SetResponseHeaderLayer::if_not_present preserves any value the handler
+        // already set (e.g. Content-Type set by axum) and only injects the default
+        // for headers that are absent — safe to stack multiple times.
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::HeaderName::from_static("x-content-type-options"),
+            axum::http::HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::HeaderName::from_static("x-frame-options"),
+            axum::http::HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::HeaderName::from_static("referrer-policy"),
+            axum::http::HeaderValue::from_static("no-referrer"),
+        ))
 }
 
 // ---------- error mapping ----------------------------------------------
@@ -310,8 +331,29 @@ impl FromRequestParts<AppState> for AuthActor {
             .and_then(|s| s.strip_prefix("Bearer "))
             .map(str::trim);
 
-        match token.and_then(|t| state.api_keys.get(t)) {
-            Some(actor_id) => Ok(AuthActor(actor_id.clone())),
+        // FIX: use constant-time comparison for every key in the map so that
+        // timing differences cannot reveal which token prefixes are valid
+        // (OWASP A07 — Identification and Authentication Failures).
+        // The linear scan always visits ALL keys regardless of match position;
+        // short-circuit on the first match would leak timing information.
+        let actor_id: Option<String> = token.and_then(|t| {
+            let t_bytes = t.as_bytes();
+            let mut found: Option<&str> = None;
+            for (key, actor) in state.api_keys.iter() {
+                // ct_eq returns Choice(1) on match, Choice(0) on mismatch —
+                // the comparison always runs to completion regardless of result.
+                let eq: bool = key.as_bytes().ct_eq(t_bytes).into();
+                if eq {
+                    // Record the match but continue scanning so all keys are
+                    // always visited (constant-time across all keys).
+                    found = Some(actor.as_str());
+                }
+            }
+            found.map(str::to_owned)
+        });
+
+        match actor_id {
+            Some(id) => Ok(AuthActor(id)),
             // FIX: missing/unknown token returns 401 (not 403) — the caller
             // is unauthenticated, not merely unauthorised for this resource.
             None => Err((

@@ -170,7 +170,13 @@ pub fn open_db(path: &str) -> rusqlite::Result<Connection> {
             category   TEXT NOT NULL,
             min_tier   TEXT NOT NULL,
             deleted_at INTEGER
-         );",
+         );
+         -- FIX: indexes for O(log n) personal-history + time-range queries.
+         -- Without these, GET /reports/history/{id} and paginated audit/usage
+         -- endpoints do full table scans (O(n)) on large event logs.
+         CREATE INDEX IF NOT EXISTS idx_usage_passenger ON usage_events(passenger_id);
+         CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_events(timestamp);
+         CREATE INDEX IF NOT EXISTS idx_admin_timestamp ON admin_events(timestamp);",
     )?;
     Ok(conn)
 }

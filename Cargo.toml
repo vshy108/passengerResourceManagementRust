@@ -10,14 +10,14 @@ publish = false
 default = []
 # Optional HTTP adapter. Pulls in axum/tokio/serde and enables the
 # `serve` binary. The core library and tests do not depend on this.
-http = ["dep:axum", "dep:tokio", "dep:tower", "dep:tower-http", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tracing-subscriber", "dep:clap", "dep:utoipa", "dep:rusqlite", "dep:tower_governor"]
+http = ["dep:axum", "dep:tokio", "dep:tower", "dep:tower-http", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tracing-subscriber", "dep:clap", "dep:utoipa", "dep:rusqlite", "dep:tower_governor", "dep:subtle"]
 
 [dependencies]
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 axum = { version = "0.8", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"], optional = true }
-tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "util"], optional = true }
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "set-header", "util"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 tracing = { version = "0.1", optional = true }
@@ -30,6 +30,9 @@ utoipa = { version = "5", features = ["axum_extras"], optional = true }
 rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 tower = { version = "0.5", features = ["util"], optional = true }
 tower_governor = { version = "0.8.0", features = ["axum"], optional = true }
+# Constant-time byte comparison for bearer token validation (OWASP A07).
+# `no_std` compatible, zero dependencies, trivially auditable.
+subtle = { version = "2", optional = true }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

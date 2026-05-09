@@ -142,7 +142,8 @@ impl World {
     #[cfg(feature = "http")]
     #[must_use]
     pub fn ping_db(&self) -> Option<bool> {
-        self.entity_store.as_ref().map(|s| s.ping_db())
+        // FIX: map(SqliteEntityStore::ping_db) avoids redundant closure
+        self.entity_store.as_ref().map(SqliteEntityStore::ping_db)
     }
 }
 

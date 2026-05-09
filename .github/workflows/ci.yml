@@ -33,7 +33,9 @@ jobs:
       - name: clippy (default features)
         run: cargo clippy --all-targets -- -D warnings
       - name: clippy (--features http)
-        run: cargo clippy --all-targets --features http -- -D warnings
+        # FIX: match local dev gate — pedantic catches doc/style issues
+        # that -D warnings alone misses, preventing CI/local divergence.
+        run: cargo clippy --all-targets --features http -- -D warnings -W clippy::pedantic
       - name: nextest (default features)
         run: cargo nextest run
       - name: nextest (--features http)
