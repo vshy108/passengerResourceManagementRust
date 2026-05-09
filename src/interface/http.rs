@@ -456,7 +456,10 @@ async fn replace_crew_lead(
         // `Ok(())` matches the unit-Ok variant. `()` is the empty tuple
         // (Rust's "void"). NO_CONTENT (204) is the conventional response
         // for successful mutations with no body to return.
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            w.flush_to_db();
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => err_response_owned(&e),
     }
 }
@@ -500,7 +503,10 @@ async fn create_passenger(
         .passengers
         .create(&actor, PassengerId(req.id), req.name, Tier::from(req.tier))
     {
-        Ok(p) => (StatusCode::CREATED, Json(PassengerDto::from(&p))).into_response(),
+        Ok(p) => {
+            w.flush_to_db();
+            (StatusCode::CREATED, Json(PassengerDto::from(&p))).into_response()
+        }
         Err(e) => err_response_owned(&e),
     }
 }
@@ -521,7 +527,10 @@ async fn change_passenger_tier(
         .passengers
         .change_tier(&actor, &PassengerId(id), Tier::from(req.tier))
     {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            w.flush_to_db();
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => err_response_owned(&e),
     }
 }
@@ -537,7 +546,10 @@ async fn soft_delete_passenger(
     let mut w = lock_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w.passengers.soft_delete(&actor, &PassengerId(id)) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            w.flush_to_db();
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => err_response_owned(&e),
     }
 }
@@ -584,7 +596,10 @@ async fn create_resource(
         req.category,
         Tier::from(req.min_tier),
     ) {
-        Ok(r) => (StatusCode::CREATED, Json(ResourceDto::from(&r))).into_response(),
+        Ok(r) => {
+            w.flush_to_db();
+            (StatusCode::CREATED, Json(ResourceDto::from(&r))).into_response()
+        }
         Err(e) => err_response_owned(&e),
     }
 }
@@ -605,7 +620,10 @@ async fn change_resource_min_tier(
         .resources
         .change_min_tier(&actor, &ResourceId(id), Tier::from(req.tier))
     {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            w.flush_to_db();
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => err_response_owned(&e),
     }
 }
@@ -621,7 +639,10 @@ async fn soft_delete_resource(
     let mut w = lock_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w.resources.soft_delete(&actor, &ResourceId(id)) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            w.flush_to_db();
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => err_response_owned(&e),
     }
 }

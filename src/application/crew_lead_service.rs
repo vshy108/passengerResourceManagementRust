@@ -52,6 +52,35 @@ impl CrewLeadService {
         Ok(Self { leads, audit: None })
     }
 
+    /// Restore crew leads from persistent storage without emitting audit events.
+    /// Identical validation to `bootstrap` but skips event emission.
+    ///
+    /// # Errors
+    /// Returns `DomainError::CrewLeadBootstrapInvalid` if count ≠ 3 or ids
+    /// are not distinct.
+    pub fn restore(leads: Vec<CrewLead>) -> Result<Self, DomainError> {
+        // Same structural invariant as bootstrap (CL-I1, CL-I2).
+        if leads.len() != 3 {
+            return Err(DomainError::CrewLeadBootstrapInvalid);
+        }
+        for i in 0..leads.len() {
+            for j in (i + 1)..leads.len() {
+                if leads[i].id == leads[j].id {
+                    return Err(DomainError::CrewLeadBootstrapInvalid);
+                }
+            }
+        }
+        Ok(Self { leads, audit: None })
+    }
+
+    /// Attach an audit configuration for future write operations.
+    /// Used after `restore()` to enable auditing without replaying bootstrap events.
+    #[must_use]
+    pub fn with_future_audit(mut self, clock: Box<dyn Clock>, sink: Box<dyn AdminEventSink>) -> Self {
+        self.audit = Some(AuditCfg { clock, sink });
+        self
+    }
+
     /// CL-R2 — always rejected because the cap is already at 3.
     ///
     /// # Errors

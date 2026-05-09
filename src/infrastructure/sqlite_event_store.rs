@@ -144,6 +144,23 @@ pub fn open_db(path: &str) -> rusqlite::Result<Connection> {
             target_id   TEXT NOT NULL,
             timestamp   INTEGER NOT NULL,
             details     TEXT
+         );
+         CREATE TABLE IF NOT EXISTS crew_leads (
+            id   TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS passengers (
+            id         TEXT PRIMARY KEY NOT NULL,
+            name       TEXT NOT NULL,
+            tier       TEXT NOT NULL,
+            deleted_at INTEGER
+         );
+         CREATE TABLE IF NOT EXISTS resources (
+            id         TEXT PRIMARY KEY NOT NULL,
+            name       TEXT NOT NULL,
+            category   TEXT NOT NULL,
+            min_tier   TEXT NOT NULL,
+            deleted_at INTEGER
          );",
     )?;
     Ok(conn)
@@ -352,6 +369,210 @@ impl AdminEventSink for SqliteAdminEventSink {
             )
             .expect("sqlite admin_events INSERT failed");
         inner.cache.push(event);
+    }
+}
+
+// ---------- SqliteEntityStore -------------------------------------------
+
+/// Write-through store for entity snapshots (crew leads, passengers, resources).
+///
+/// Each call to `sync_*` runs a DELETE-then-INSERT transaction, replacing
+/// the stored set atomically. With the World `Mutex` already giving us
+/// exclusive access, the inner `Mutex<Connection>` is always uncontested.
+///
+/// Loaded via `open_db()` which creates all five tables (event tables +
+/// three entity tables) on first open.
+pub struct SqliteEntityStore {
+    conn: Mutex<Connection>,
+}
+
+impl SqliteEntityStore {
+    /// Wrap an already-opened connection (from `open_db`).
+    pub fn new(conn: Connection) -> Self {
+        Self { conn: Mutex::new(conn) }
+    }
+
+    /// Returns `true` if the `crew_leads` table is empty (i.e. this is
+    /// the first run and entity tables need to be seeded).
+    ///
+    /// # Panics
+    /// If the inner mutex is poisoned or the query fails (unrecoverable).
+    #[must_use]
+    pub fn is_first_run(&self) -> bool {
+        let conn = self.conn.lock().expect("entity store conn mutex poisoned");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM crew_leads", [], |r| r.get(0))
+            .unwrap_or(0);
+        count == 0
+    }
+
+    /// Load all crew leads from the database (insertion order).
+    ///
+    /// # Errors
+    /// `rusqlite::Error` if the query fails.
+    ///
+    /// # Panics
+    /// If the inner mutex is poisoned.
+    pub fn load_crew_leads(&self) -> rusqlite::Result<Vec<crate::domain::crew_lead::CrewLead>> {
+        let conn = self.conn.lock().expect("entity store conn mutex poisoned");
+        let mut stmt = conn.prepare("SELECT id, name FROM crew_leads ORDER BY rowid ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(crate::domain::crew_lead::CrewLead {
+                id: crate::domain::crew_lead::CrewLeadId(row.get(0)?),
+                name: row.get(1)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Load passengers split into `(active, deleted)` lists.
+    ///
+    /// # Errors
+    /// `rusqlite::Error` if the query fails.
+    ///
+    /// # Panics
+    /// If the inner mutex is poisoned.
+    pub fn load_passengers(
+        &self,
+    ) -> rusqlite::Result<(
+        Vec<crate::domain::passenger::Passenger>,
+        Vec<crate::domain::passenger::Passenger>,
+    )> {
+        let conn = self.conn.lock().expect("entity store conn mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, name, tier, deleted_at FROM passengers ORDER BY rowid ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+            ))
+        })?;
+        let mut active = Vec::new();
+        let mut deleted = Vec::new();
+        for row in rows {
+            let (id, name, tier_s, del) = row?;
+            let p = crate::domain::passenger::Passenger {
+                id: crate::domain::passenger::PassengerId(id),
+                name,
+                tier: tier_from_str(&tier_s)?,
+                deleted_at: del.map(crate::domain::timestamp::Timestamp),
+            };
+            if p.deleted_at.is_some() {
+                deleted.push(p);
+            } else {
+                active.push(p);
+            }
+        }
+        Ok((active, deleted))
+    }
+
+    /// Load resources split into `(active, deleted)` lists.
+    ///
+    /// # Errors
+    /// `rusqlite::Error` if the query fails.
+    ///
+    /// # Panics
+    /// If the inner mutex is poisoned.
+    pub fn load_resources(
+        &self,
+    ) -> rusqlite::Result<(
+        Vec<crate::domain::resource::Resource>,
+        Vec<crate::domain::resource::Resource>,
+    )> {
+        let conn = self.conn.lock().expect("entity store conn mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, name, category, min_tier, deleted_at FROM resources ORDER BY rowid ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+            ))
+        })?;
+        let mut active = Vec::new();
+        let mut deleted = Vec::new();
+        for row in rows {
+            let (id, name, category, min_s, del) = row?;
+            let r = crate::domain::resource::Resource {
+                id: crate::domain::resource::ResourceId(id),
+                name,
+                category,
+                min_tier: tier_from_str(&min_s)?,
+                deleted_at: del.map(crate::domain::timestamp::Timestamp),
+            };
+            if r.deleted_at.is_some() {
+                deleted.push(r);
+            } else {
+                active.push(r);
+            }
+        }
+        Ok((active, deleted))
+    }
+
+    /// Replace all crew leads in the database with a DELETE + INSERT transaction.
+    ///
+    /// # Panics
+    /// If the inner mutex is poisoned or any write fails (diverged state
+    /// would be unrecoverable).
+    pub fn sync_crew_leads(&self, leads: &[crate::domain::crew_lead::CrewLead]) {
+        let conn = self.conn.lock().expect("entity store conn mutex poisoned");
+        conn.execute_batch("DELETE FROM crew_leads")
+            .expect("sqlite crew_leads DELETE failed");
+        for lead in leads {
+            conn.execute(
+                "INSERT INTO crew_leads (id, name) VALUES (?1, ?2)",
+                params![lead.id.0, lead.name],
+            )
+            .expect("sqlite crew_leads INSERT failed");
+        }
+    }
+
+    /// Replace all passengers in the database (active and deleted) atomically.
+    ///
+    /// # Panics
+    /// If the inner mutex is poisoned or any write fails.
+    pub fn sync_passengers(
+        &self,
+        active: &[crate::domain::passenger::Passenger],
+        deleted: &[crate::domain::passenger::Passenger],
+    ) {
+        let conn = self.conn.lock().expect("entity store conn mutex poisoned");
+        conn.execute_batch("DELETE FROM passengers")
+            .expect("sqlite passengers DELETE failed");
+        for p in active.iter().chain(deleted.iter()) {
+            conn.execute(
+                "INSERT INTO passengers (id, name, tier, deleted_at) VALUES (?1, ?2, ?3, ?4)",
+                params![p.id.0, p.name, tier_to_str(p.tier), p.deleted_at.map(|t| t.0)],
+            )
+            .expect("sqlite passengers INSERT failed");
+        }
+    }
+
+    /// Replace all resources in the database (active and deleted) atomically.
+    ///
+    /// # Panics
+    /// If the inner mutex is poisoned or any write fails.
+    pub fn sync_resources(
+        &self,
+        active: &[crate::domain::resource::Resource],
+        deleted: &[crate::domain::resource::Resource],
+    ) {
+        let conn = self.conn.lock().expect("entity store conn mutex poisoned");
+        conn.execute_batch("DELETE FROM resources")
+            .expect("sqlite resources DELETE failed");
+        for r in active.iter().chain(deleted.iter()) {
+            conn.execute(
+                "INSERT INTO resources (id, name, category, min_tier, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![r.id.0, r.name, r.category, tier_to_str(r.min_tier), r.deleted_at.map(|t| t.0)],
+            )
+            .expect("sqlite resources INSERT failed");
+        }
     }
 }
 

@@ -22,6 +22,8 @@ use crate::infrastructure::in_memory_usage_event_sink::InMemoryUsageEventSink;
 use crate::infrastructure::sqlite_event_store::{
     SqliteAdminEventSink, SqliteUsageEventSink, open_db,
 };
+#[cfg(feature = "http")]
+use crate::infrastructure::SqliteEntityStore;
 
 // ---------- sink enums --------------------------------------------------
 // These enums dispatch between the in-memory adapters (used in tests and
@@ -103,6 +105,26 @@ pub struct World {
     /// Clone-able handle on the same shared admin-event buffer the
     /// services write to — exposed so reporting endpoints can read it.
     pub audit_sink: AuditSink,
+    /// Present when `PRMS_DB_PATH` is set. HTTP handlers call
+    /// `flush_to_db()` after each entity mutation to persist state.
+    #[cfg(feature = "http")]
+    pub entity_store: Option<SqliteEntityStore>,
+}
+
+impl World {
+    /// Flush all entity state to `SQLite`. No-op when `entity_store` is `None`.
+    ///
+    /// # Panics
+    /// Panics if any `SQLite` write fails — a divergence between in-memory
+    /// and persistent state is unrecoverable, so crashing is correct.
+    #[cfg(feature = "http")]
+    pub fn flush_to_db(&self) {
+        if let Some(store) = &self.entity_store {
+            store.sync_crew_leads(self.crew_leads.list());
+            store.sync_passengers(self.passengers.list(), self.passengers.deleted());
+            store.sync_resources(self.resources.list(), self.resources.deleted());
+        }
+    }
 }
 
 /// Build a fresh demo world: 3 seeded Crew Leads, 3 sample passengers,
@@ -122,25 +144,25 @@ pub fn build_demo_world() -> Result<World, DomainError> {
 
 /// Build a world backed by `SQLite` at `db_path`.
 ///
-/// Existing events (from a previous run) are loaded from the database
-/// before the demo entities are seeded. Entity state (passengers,
-/// resources, crew leads) still lives in memory and resets on restart;
-/// only the event logs are persisted.
+/// On first run (empty entity tables): seeds the demo world and persists
+/// all entities to `SQLite`. On subsequent runs: restores entity state
+/// from the database without re-seeding, so mutations survive restarts.
+/// Usage events and admin events are always loaded from prior runs.
 ///
 /// Use `":memory:"` for a transient `SQLite` database (useful for testing
 /// the `SQLite` adapters directly without touching the filesystem).
 ///
 /// # Errors
-/// - `rusqlite::Error` (wrapped as `DomainError::StorageError`) if the
-///   database cannot be opened or the schema cannot be applied.
-/// - `DomainError` if the demo seed data fails (should not happen in
-///   practice).
+/// - `BuildError::Sqlite` if any database operation fails.
+/// - `BuildError::Domain` if service invariants are violated (should not
+///   happen with well-formed persistent data or the seeded demo data).
 #[cfg(feature = "http")]
 pub fn build_world_with_sqlite(db_path: &str) -> Result<World, BuildError> {
-    // Two independent connections to the same file — one per sink.
-    // SQLite WAL mode (enabled by open_db) handles concurrent access.
+    // Three independent connections to the same file — one per concern.
+    // `SQLite` WAL mode (enabled by open_db) handles concurrent access.
     let usage_conn = open_db(db_path).map_err(BuildError::Sqlite)?;
     let admin_conn = open_db(db_path).map_err(BuildError::Sqlite)?;
+    let entity_conn = open_db(db_path).map_err(BuildError::Sqlite)?;
 
     let audit_sink = AuditSink::Sqlite(
         SqliteAdminEventSink::open(admin_conn).map_err(BuildError::Sqlite)?,
@@ -148,8 +170,48 @@ pub fn build_world_with_sqlite(db_path: &str) -> Result<World, BuildError> {
     let usage_sink = UsageSink::Sqlite(
         SqliteUsageEventSink::open(usage_conn).map_err(BuildError::Sqlite)?,
     );
+    let entity_store = SqliteEntityStore::new(entity_conn);
 
-    build_world(audit_sink, usage_sink).map_err(BuildError::Domain)
+    if entity_store.is_first_run() {
+        // First run: seed demo entities, then persist them to the DB so
+        // subsequent restarts can restore state without re-seeding.
+        let mut world = build_world(audit_sink, usage_sink).map_err(BuildError::Domain)?;
+        world.entity_store = Some(entity_store);
+        world.flush_to_db();
+        Ok(world)
+    } else {
+        // Subsequent run: restore entity state from the database.
+        let leads = entity_store.load_crew_leads().map_err(BuildError::Sqlite)?;
+        let (active_pax, deleted_pax) =
+            entity_store.load_passengers().map_err(BuildError::Sqlite)?;
+        let (active_res, deleted_res) =
+            entity_store.load_resources().map_err(BuildError::Sqlite)?;
+
+        // Restore crew leads WITHOUT emitting bootstrap events (they are
+        // already in the admin event log from the original run).
+        let crew_leads = CrewLeadService::restore(leads)
+            .map_err(BuildError::Domain)?
+            .with_future_audit(Box::new(FakeClock::default()), Box::new(audit_sink.clone()));
+
+        let passengers = PassengerService::new(FakeClock::default())
+            .with_audit(Box::new(audit_sink.clone()))
+            .with_preloaded(active_pax, deleted_pax);
+
+        let resources = ResourceService::new(FakeClock::default())
+            .with_audit(Box::new(audit_sink.clone()))
+            .with_preloaded(active_res, deleted_res);
+
+        let access = AccessService::new(FakeClock::default(), usage_sink);
+
+        Ok(World {
+            crew_leads,
+            passengers,
+            resources,
+            access,
+            audit_sink,
+            entity_store: Some(entity_store),
+        })
+    }
 }
 
 /// Shared wiring for both world builders.
@@ -236,6 +298,8 @@ fn build_world(audit_sink: AuditSink, usage_sink: UsageSink) -> Result<World, Do
         resources,
         access,
         audit_sink,
+        #[cfg(feature = "http")]
+        entity_store: None,
     })
 }
 

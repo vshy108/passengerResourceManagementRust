@@ -40,6 +40,21 @@ impl<C: Clock> ResourceService<C> {
         self
     }
 
+    /// Restore pre-existing resource records loaded from persistent storage.
+    /// Does NOT emit audit events — the records already exist in the audit log.
+    #[must_use]
+    pub fn with_preloaded(mut self, active: Vec<Resource>, deleted: Vec<Resource>) -> Self {
+        self.active = active;
+        self.deleted = deleted;
+        self
+    }
+
+    /// Soft-deleted resources (for persistence snapshots).
+    #[must_use]
+    pub fn deleted(&self) -> &[Resource] {
+        &self.deleted
+    }
+
     /// RS-R1.
     ///
     /// # Errors

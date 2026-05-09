@@ -49,6 +49,21 @@ impl<C: Clock> PassengerService<C> {
         self
     }
 
+    /// Restore pre-existing passenger records loaded from persistent storage.
+    /// Does NOT emit audit events — the records already exist in the audit log.
+    #[must_use]
+    pub fn with_preloaded(mut self, active: Vec<Passenger>, deleted: Vec<Passenger>) -> Self {
+        self.active = active;
+        self.deleted = deleted;
+        self
+    }
+
+    /// Soft-deleted passengers (for persistence snapshots).
+    #[must_use]
+    pub fn deleted(&self) -> &[Passenger] {
+        &self.deleted
+    }
+
     /// PS-R1 — Crew-Lead-only create.
     ///
     /// # Errors
