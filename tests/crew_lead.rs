@@ -111,6 +111,35 @@ fn cl_s9_replace_with_clashing_new_id_returns_already_exists() {
     assert_eq!(svc.list(), before.as_slice());
 }
 
+// -- Restore (CL-S12/S13) — covers crew_lead_service.rs lines 64, 69 ----
+
+#[test]
+fn cl_s12_restore_with_wrong_count_fails() {
+    // FIX: `restore()` requires exactly 3 leads — fewer must return
+    // `CrewLeadBootstrapInvalid` (crew_lead_service.rs line 64).
+    let res = CrewLeadService::restore(vec![lead("a", "Alice"), lead("b", "Bob")]);
+    assert_eq!(res.err(), Some(DomainError::CrewLeadBootstrapInvalid));
+}
+
+#[test]
+fn cl_s13_restore_with_duplicate_ids_fails() {
+    // FIX: `restore()` must reject duplicate IDs — same invariant as
+    // bootstrap (crew_lead_service.rs line 69).
+    let res = CrewLeadService::restore(vec![
+        lead("a", "Alice"),
+        lead("a", "Alice II"),
+        lead("c", "Cara"),
+    ]);
+    assert_eq!(res.err(), Some(DomainError::CrewLeadBootstrapInvalid));
+}
+
+#[test]
+fn cl_s14_restore_with_three_distinct_leads_succeeds() {
+    // Happy path for restore — ensures the function can construct a valid service.
+    let svc = CrewLeadService::restore(three_distinct_leads()).expect("CL-S14");
+    assert_eq!(svc.list().len(), 3);
+}
+
 // -- Listing (CL-S11) --------------------------------------------------
 
 #[test]
