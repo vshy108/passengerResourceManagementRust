@@ -5,9 +5,8 @@
 mod http_common;
 
 use axum::http::{Method, StatusCode};
-use serde_json::json;
 
-use http_common::{ARIA, CL_TOKEN, app, auth_req, req, send};
+use http_common::{CL_TOKEN, app, auth_req, req, send};
 
 #[tokio::test]
 async fn reset_replaces_state_with_fresh_demo_world() {

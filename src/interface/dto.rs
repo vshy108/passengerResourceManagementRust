@@ -68,6 +68,31 @@ pub struct CrewLeadDto {
     pub name: String,
 }
 
+impl CrewLeadDto {
+    /// Validate string-field lengths at the interface boundary.
+    /// Rejects IDs / names that exceed 255 chars to prevent oversized payloads
+    /// from reaching the domain layer (OWASP A03 — injection / resource abuse).
+    ///
+    /// # Errors
+    ///
+    /// Returns a static error message string if any field is empty or exceeds 255 characters.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.id.is_empty() {
+            return Err("id must not be empty");
+        }
+        if self.id.len() > 255 {
+            return Err("id must be 255 characters or fewer");
+        }
+        if self.name.is_empty() {
+            return Err("name must not be empty");
+        }
+        if self.name.len() > 255 {
+            return Err("name must be 255 characters or fewer");
+        }
+        Ok(())
+    }
+}
+
 // `From<&CrewLead>` (borrow): converts WITHOUT consuming the source.
 // Useful when serialising a response from a service-owned value.
 impl From<&CrewLead> for CrewLeadDto {
@@ -131,6 +156,27 @@ pub struct CreatePassengerReq {
     pub tier: TierDto,
 }
 
+impl CreatePassengerReq {
+    /// # Errors
+    ///
+    /// Returns a static error message string if any field is empty or exceeds 255 characters.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.id.is_empty() {
+            return Err("id must not be empty");
+        }
+        if self.id.len() > 255 {
+            return Err("id must be 255 characters or fewer");
+        }
+        if self.name.is_empty() {
+            return Err("name must not be empty");
+        }
+        if self.name.len() > 255 {
+            return Err("name must be 255 characters or fewer");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChangeTierReq {
@@ -169,12 +215,54 @@ pub struct CreateResourceReq {
     pub min_tier: TierDto,
 }
 
+impl CreateResourceReq {
+    /// # Errors
+    ///
+    /// Returns a static error message string if any field is empty or exceeds 255 characters.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.id.is_empty() {
+            return Err("id must not be empty");
+        }
+        if self.id.len() > 255 {
+            return Err("id must be 255 characters or fewer");
+        }
+        if self.name.is_empty() {
+            return Err("name must not be empty");
+        }
+        if self.name.len() > 255 {
+            return Err("name must be 255 characters or fewer");
+        }
+        if self.category.is_empty() {
+            return Err("category must not be empty");
+        }
+        if self.category.len() > 255 {
+            return Err("category must be 255 characters or fewer");
+        }
+        Ok(())
+    }
+}
+
 // ---------- access ------------------------------------------------------
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UseResourceReq {
     pub resource_id: String,
+}
+
+impl UseResourceReq {
+    /// # Errors
+    ///
+    /// Returns a static error message string if `resource_id` is empty or exceeds 255 characters.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.resource_id.is_empty() {
+            return Err("resource_id must not be empty");
+        }
+        if self.resource_id.len() > 255 {
+            return Err("resource_id must be 255 characters or fewer");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -300,9 +388,11 @@ pub struct PaginationQuery {
 }
 
 impl PaginationQuery {
+    #[must_use]
     pub fn offset(&self) -> usize {
         self.offset.unwrap_or(0)
     }
+    #[must_use]
     pub fn limit(&self) -> usize {
         self.limit.unwrap_or(100).min(1000)
     }

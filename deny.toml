@@ -26,6 +26,9 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-3-Clause",
     "Unicode-3.0",
+    # Added for tower_governor dependencies:
+    "Zlib",  # foldhash — OSI-approved permissive license
+    "ISC",   # forwarded-header-value — OSI-approved permissive license
 ]
 confidence-threshold = 0.8
 

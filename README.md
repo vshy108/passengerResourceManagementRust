@@ -106,14 +106,23 @@ cargo run --features http --bin serve
 | `GET` | `/reports/personal-history/{id}` | Personal usage history for a passenger |
 | `POST` | `/reset` | Reset in-memory state — only registered when `PRMS_ENABLE_RESET=true` |
 
-State is in-process and resets on restart. Quick smoke test:
+State is in-process and resets on restart. Quick smoke test (requires `PRMS_API_KEYS` — see below):
 
 ```bash
 curl http://127.0.0.1:8080/health
-curl http://127.0.0.1:8080/crew-leads
+curl -H 'Authorization: Bearer cl-aria-token' http://127.0.0.1:8080/crew-leads
 curl -X POST http://127.0.0.1:8080/access \
   -H 'Content-Type: application/json' \
-  -d '{"passenger_id":"ps-001","resource_id":"res-lounge"}'
+  -H 'Authorization: Bearer ps-001-token' \
+  -d '{"resource_id":"res-lounge"}'
+```
+
+Start the server with tokens mapped to actor IDs:
+
+```bash
+cargo run --features http --bin serve -- \
+  --api-keys 'cl-aria-token:cl-aria,ps-001-token:ps-001' \
+  --enable-reset
 ```
 
 ### Configuration
@@ -126,6 +135,7 @@ All flags also read from the matching environment variable:
 | `--cors-origins`        | `PRMS_CORS_ORIGINS`        | _unset_ (`Any`)    | Comma-separated allow-list, e.g. `https://app.x26`   |
 | `--enable-reset`        | `PRMS_ENABLE_RESET`        | `false`            | Register the `/reset` route (local dev only)         |
 | `--shutdown-grace-secs` | `PRMS_SHUTDOWN_GRACE_SECS` | `10`               | Max seconds to drain in-flight requests after SIGINT |
+| `--api-keys`            | `PRMS_API_KEYS`            | _unset_ (all 401)  | Comma-separated `token:actor-id` pairs, e.g. `tok1:cl-aria,tok2:ps-001` |
 | `RUST_LOG`              | _(env only)_               | `info`             | tracing-subscriber filter                            |
 
 Every response carries an `x-request-id` header (UUID-v4 if the client
@@ -141,6 +151,8 @@ and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
 | Method | Path                              | Purpose                              |
 | ------ | --------------------------------- | ------------------------------------ |
 | GET    | `/health`                         | liveness probe                       |
+| GET    | `/health/ready`                   | readiness probe (returns 503 if not ready) |
+| GET    | `/metrics`                        | Prometheus text metrics              |
 | GET    | `/openapi.json`                   | OpenAPI 3.1 document                 |
 | GET    | `/crew-leads`                     | list crew leads                      |
 | POST   | `/crew-leads`                     | add crew lead (always 409, capped)   |
@@ -201,10 +213,12 @@ so the type system catches mix-ups at compile time. Errors are a single
   sinks behind small port traits. Adding a real DB is the next adapter
   boundary, but we did not ship one because the brief did not ask for
   durability. See `src/infrastructure/`.
-- **No real authentication.** Admin endpoints accept `actor_id` at face
-  value and verify only service-level authorization. Real identity
-  verification was out of scope; adding it later should happen at the
-  HTTP boundary before constructing `Actor` values.
+- **Token-based authentication.** Every request must carry
+  `Authorization: Bearer <token>`. The server resolves the token to an
+  `Actor` via `PRMS_API_KEYS` at startup — unknown tokens return 401.
+  For local demo / E2E, pass `--api-keys token:actor-id,...` or the
+  `PRMS_API_KEYS` env var. Tokens are never stored on disk; a real
+  deployment would back this with a secrets manager.
 - **`PartialOrd` via `Tier::rank()`.** We compare tiers through an
   explicit `rank()` rather than deriving `Ord` on the enum so the
   ordering is documented in code and stays stable if variants are
@@ -245,10 +259,8 @@ The HTTP server is a demo affordance, not a production target:
 
 - State is held in a single mutex around `World` — fine for the demo, will not
   scale beyond a handful of concurrent writers.
-- All admin endpoints accept `actor_id` at face value; this crate ships
-  no authentication layer (see [`AGENTS.md`](./AGENTS.md) §8).
-- `POST /reset` is gated by "must be a known crew lead" but is still
-  intended for local demo / test use only.
+- `POST /reset` is gated by `PRMS_ENABLE_RESET=true` and "must be a
+  known crew lead" — intended for local demo / test use only.
 - CORS defaults to `Any` for dev convenience; set `PRMS_CORS_ORIGINS`
   before exposing the server beyond localhost.
 - There is no durable storage, pagination, or stable event-ID sequence

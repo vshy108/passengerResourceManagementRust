@@ -68,7 +68,7 @@ pub enum DomainError {
     #[error("resource not found")]
     ResourceNotFound,
 
-    /// AC-E2 — raised (and a `Denied` UsageEvent still emitted) when
+    /// AC-E2 — raised (and a `Denied` `UsageEvent` still emitted) when
     /// the passenger's tier rank is below the resource's `min_tier`
     /// rank. See TP-R2.
     #[error("access denied")]

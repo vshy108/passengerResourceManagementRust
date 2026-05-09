@@ -118,7 +118,7 @@ fn kind_from_str(s: &str) -> rusqlite::Result<TargetKind> {
 
 // ---------- schema -------------------------------------------------------
 
-/// Open (or create) a SQLite database at `path`, enable WAL mode, and
+/// Open (or create) a `SQLite` database at `path`, enable WAL mode, and
 /// apply the append-only event schema. Use `":memory:"` in tests.
 ///
 /// # Errors
@@ -151,7 +151,7 @@ pub fn open_db(path: &str) -> rusqlite::Result<Connection> {
 
 // ---------- SqliteUsageEventSink -----------------------------------------
 
-/// Write-through SQLite sink for `UsageEvent`s.
+/// Write-through `SQLite` sink for `UsageEvent`s.
 ///
 /// - `conn` is **not** shared (no Arc): this sink is exclusively owned by
 ///   one `AccessService`. The `Arc<Mutex<World>>` in the HTTP adapter
@@ -256,7 +256,7 @@ struct AdminInner {
     cache: Vec<AdminEvent>,
 }
 
-/// Write-through SQLite sink for `AdminEvent`s.
+/// Write-through `SQLite` sink for `AdminEvent`s.
 ///
 /// Unlike `SqliteUsageEventSink`, this IS cloneable — multiple services
 /// (crew-lead, passenger, resource) each hold a clone so they all write

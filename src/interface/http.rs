@@ -34,6 +34,8 @@ use axum::
 // `tower-http` is a collection of reusable HTTP middlewares.
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use tower_governor::GovernorLayer;
+use tower_governor::governor::GovernorConfigBuilder;
 use utoipa::OpenApi;
 
 use crate::domain::actor::Actor;
@@ -84,8 +86,9 @@ pub enum CorsOrigins {
 /// Build the axum router with CORS and the full PRMS endpoint surface.
 ///
 /// Equivalent to [`router_with`] using `CorsOrigins::Any` and reset disabled.
+/// Rate limiting is **disabled** — use this in tests to avoid IP-based throttling.
 pub fn router(state: AppState) -> Router {
-    router_with(state, CorsOrigins::Any, false)
+    router_with(state, CorsOrigins::Any, false, false)
 }
 
 /// Build the axum router with explicit CORS configuration.
@@ -93,7 +96,22 @@ pub fn router(state: AppState) -> Router {
 /// `enable_reset` — when `false` the `/reset` route is not registered,
 /// making it impossible to wipe state via the HTTP API. Set to `true`
 /// only for local dev / integration tests.
-pub fn router_with(state: AppState, cors_origins: CorsOrigins, enable_reset: bool) -> Router {
+///
+/// `enable_rate_limit` — when `true` attaches a per-IP governor layer
+/// (50-burst, 10 req/s). Set to `false` in tests to avoid in-process
+/// requests all sharing the same loopback IP exhausting the bucket.
+///
+/// # Panics
+///
+/// Panics if the `GovernorConfigBuilder` produces an invalid configuration.
+/// This cannot happen with the hard-coded `per_second(10).burst_size(50)`
+/// values used here.
+pub fn router_with(
+    state: AppState,
+    cors_origins: CorsOrigins,
+    enable_reset: bool,
+    enable_rate_limit: bool,
+) -> Router {
     let cors = match cors_origins {
         CorsOrigins::Any => CorsLayer::new()
             .allow_origin(Any)
@@ -161,6 +179,26 @@ pub fn router_with(state: AppState, cors_origins: CorsOrigins, enable_reset: boo
         // 64 KiB body cap — every request DTO in this app is tiny.
         // Defends against accidental/malicious oversized payloads.
         .layer(DefaultBodyLimit::max(64 * 1024))
+        // Rate limiting: 50 req/s burst, replenishing 10 req/s per IP.
+        // Defends against accidental/malicious high-frequency clients
+        // (OWASP A04 — Insecure Design, resource exhaustion).
+        // `per_second(10)` = 1 token every 100 ms; `burst_size(50)` = initial
+        // credit so normal clients absorb short request bursts without throttling.
+        // Disabled in tests: in-process requests all share the same loopback IP,
+        // which would exhaust the token bucket and cause spurious test failures.
+        .layer(tower::util::option_layer(if enable_rate_limit {
+            Some(GovernorLayer::new(
+                std::sync::Arc::new(
+                    GovernorConfigBuilder::default()
+                        .per_second(10)
+                        .burst_size(50)
+                        .finish()
+                        .expect("valid governor config"),
+                ),
+            ))
+        } else {
+            None
+        }))
         // `.layer(...)` wraps the entire router in a middleware. Layers
         // run in REVERSE registration order on the request side and in
         // declaration order on the response side (tower convention).
@@ -205,6 +243,19 @@ fn err_response_owned(e: &DomainError) -> Response {
         Json(ErrorBody {
             error: msg,
             code: code.to_owned(),
+        }),
+    )
+        .into_response()
+}
+
+/// Return a 400 Bad Request response with a plain message.
+/// Used by handlers to reject invalid input before reaching the domain.
+fn bad_request(msg: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorBody {
+            error: msg.to_owned(),
+            code: "InvalidInput".to_owned(),
         }),
     )
         .into_response()
@@ -301,7 +352,7 @@ async fn health_ready(State(state): State<AppState>) -> Response {
     }
 }
 
-/// Prometheus text format metrics. Not included in the OpenAPI spec
+/// Prometheus text format metrics. Not included in the `OpenAPI` spec
 /// (Prometheus scraping is a separate concern from the REST API).
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     use crate::application::ports::UsageEventSource;
@@ -378,6 +429,10 @@ async fn replace_crew_lead(
     AuthActor(actor_id): AuthActor,
     Json(req): Json<ReplaceCrewLeadReq>,
 ) -> Response {
+    // Validate the new crew lead's string fields before touching domain logic.
+    if let Err(msg) = req.new_lead.validate() {
+        return bad_request(msg);
+    }
     // `&mut w` because `replace_audited` mutates the service state.
     let mut w = lock_world(&state);
     match w.crew_leads.replace_audited(
@@ -411,6 +466,10 @@ async fn create_passenger(
     AuthActor(actor_id): AuthActor,
     Json(req): Json<CreatePassengerReq>,
 ) -> Response {
+    // Validate string lengths at the boundary before touching domain logic.
+    if let Err(msg) = req.validate() {
+        return bad_request(msg);
+    }
     let mut w = lock_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w
@@ -476,6 +535,10 @@ async fn create_resource(
     AuthActor(actor_id): AuthActor,
     Json(req): Json<CreateResourceReq>,
 ) -> Response {
+    // Validate string lengths at the boundary before touching domain logic.
+    if let Err(msg) = req.validate() {
+        return bad_request(msg);
+    }
     let mut w = lock_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id));
     match w.resources.create(
@@ -537,6 +600,10 @@ async fn use_resource(
     AuthActor(actor_id): AuthActor,
     Json(req): Json<UseResourceReq>,
 ) -> Response {
+    // Validate string lengths at the boundary before touching domain logic.
+    if let Err(msg) = req.validate() {
+        return bad_request(msg);
+    }
     let mut w = lock_world(&state);
     let actor = Actor::Passenger(PassengerId(actor_id));
     // BORROW SPLITTING: `access.use_resource` needs `&mut self` on

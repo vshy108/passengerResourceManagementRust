@@ -62,8 +62,9 @@ pub fn app() -> Router {
     .into();
     let state = AppState::new(world, api_keys);
     // FIX: router() now defaults to enable_reset=false; tests need /reset
-    // to exercise the endpoint, so we call router_with explicitly.
-    router_with(state, CorsOrigins::Any, true)
+    // Rate limiting disabled in tests: all in-process requests share the same
+    // loopback IP, so the per-IP token bucket would be exhausted immediately.
+    router_with(state, CorsOrigins::Any, true, false)
 }
 
 /// Send a request through the router in-process and return (status, body).

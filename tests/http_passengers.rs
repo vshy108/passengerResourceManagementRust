@@ -171,3 +171,57 @@ async fn delete_unknown_passenger_returns_404() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["code"], "PassengerNotFound");
 }
+
+#[tokio::test]
+async fn create_passenger_missing_token_returns_401() {
+    let app = app();
+    // No Authorization header — the AuthActor extractor should reject.
+    let (status, body) = send(
+        &app,
+        req(
+            Method::POST,
+            "/passengers",
+            Some(json!({"id": "ps-new", "name": "New", "tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["code"], "Unauthorized");
+}
+
+#[tokio::test]
+async fn create_passenger_empty_id_returns_400() {
+    let app = app();
+    // Empty id field should be rejected at the interface boundary.
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/passengers",
+            CL_TOKEN,
+            Some(json!({"id": "", "name": "Valid Name", "tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}
+
+#[tokio::test]
+async fn create_passenger_oversized_name_returns_400() {
+    let app = app();
+    // Name > 255 chars should be rejected at the interface boundary.
+    let long_name = "x".repeat(256);
+    let (status, body) = send(
+        &app,
+        auth_req(
+            Method::POST,
+            "/passengers",
+            CL_TOKEN,
+            Some(json!({"id": "ps-long", "name": long_name, "tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "InvalidInput");
+}

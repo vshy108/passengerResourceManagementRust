@@ -91,7 +91,7 @@ async fn report_personal_history_filters_by_passenger() {
     .await;
     let (_, body) = send(&app, req(Method::GET, "/reports/history/ps-001", None)).await;
     let arr = body.as_array().unwrap();
-    assert!(arr.len() >= 1);
+    assert!(!arr.is_empty());
     assert_eq!(arr[0]["passenger_id"], "ps-001");
 }
 

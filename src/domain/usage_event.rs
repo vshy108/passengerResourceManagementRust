@@ -26,7 +26,7 @@ pub struct UsageEvent {
     /// Immutable after emission — later tier changes do not retroactively
     /// reclassify this event (AC-R6 / RP-R3).
     pub tier_at_attempt: Tier,
-    /// Snapshot of the resource's min_tier AT THE TIME of the attempt.
+    /// Snapshot of the resource's `min_tier` AT THE TIME of the attempt.
     /// Same immutability guarantee as `tier_at_attempt`.
     pub min_tier_at_attempt: Tier,
     /// Timestamp from the injected `Clock` at the moment of the call.

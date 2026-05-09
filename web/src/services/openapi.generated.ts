@@ -100,6 +100,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["health_ready"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/passengers": {
         parameters: {
             query?: never;
@@ -296,9 +312,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        ActorOnlyReq: {
-            actor_id: string;
-        };
         AddCrewLeadReq: {
             lead: components["schemas"]["CrewLeadDto"];
         };
@@ -306,25 +319,21 @@ export interface components {
             action: string;
             actor_id: string;
             details?: string | null;
-            /** Format: int64 */
-            id: number;
+            id: string;
             target_id: string;
             target_kind: string;
             /** Format: int64 */
             timestamp: number;
         };
         ChangeTierReq: {
-            actor_id: string;
             tier: components["schemas"]["TierDto"];
         };
         CreatePassengerReq: {
-            actor_id: string;
             id: string;
             name: string;
             tier: components["schemas"]["TierDto"];
         };
         CreateResourceReq: {
-            actor_id: string;
             category: string;
             id: string;
             min_tier: components["schemas"]["TierDto"];
@@ -338,6 +347,16 @@ export interface components {
             code: string;
             error: string;
         };
+        /** @description Response body for `GET /health/ready`. */
+        HealthReadyDto: {
+            admin_events: number;
+            crew_leads: number;
+            passengers_active: number;
+            resources_active: number;
+            /** @description Always `"ready"` on a 200 response. */
+            status: string;
+            usage_events: number;
+        };
         /** @enum {string} */
         OutcomeDto: "Allowed" | "Denied";
         PassengerDto: {
@@ -347,11 +366,7 @@ export interface components {
             name: string;
             tier: components["schemas"]["TierDto"];
         };
-        RemoveCrewLeadReq: {
-            actor_id: string;
-        };
         ReplaceCrewLeadReq: {
-            actor_id: string;
             new_lead: components["schemas"]["CrewLeadDto"];
         };
         ResourceDto: {
@@ -377,8 +392,7 @@ export interface components {
             resource_id: string;
         };
         UsageEventDto: {
-            /** Format: int64 */
-            id: number;
+            id: string;
             min_tier_at_attempt: components["schemas"]["TierDto"];
             outcome: components["schemas"]["OutcomeDto"];
             passenger_id: string;
@@ -388,7 +402,6 @@ export interface components {
             timestamp: number;
         };
         UseResourceReq: {
-            passenger_id: string;
             resource_id: string;
         };
     };
@@ -433,7 +446,10 @@ export interface operations {
     };
     list_admin_events: {
         parameters: {
-            query?: never;
+            query?: {
+                offset?: number | null;
+                limit?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -508,17 +524,21 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RemoveCrewLeadReq"];
-            };
-        };
+        requestBody?: never;
         responses: {
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
             };
             409: {
                 headers: {
@@ -587,6 +607,35 @@ export interface operations {
                 };
                 content: {
                     "text/plain": string;
+                };
+            };
+        };
+    };
+    health_ready: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description System ready — entity counts included */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthReadyDto"];
+                };
+            };
+            /** @description World mutex poisoned */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };
@@ -679,17 +728,21 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ActorOnlyReq"];
-            };
-        };
+        requestBody?: never;
         responses: {
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
             };
             404: {
                 headers: {
@@ -800,17 +853,21 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ActorOnlyReq"];
-            };
-        };
+        requestBody?: never;
         responses: {
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
             };
             403: {
                 headers: {
@@ -931,17 +988,21 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ActorOnlyReq"];
-            };
-        };
+        requestBody?: never;
         responses: {
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
             };
             404: {
                 headers: {
@@ -986,7 +1047,10 @@ export interface operations {
     };
     list_usage_events: {
         parameters: {
-            query?: never;
+            query?: {
+                offset?: number | null;
+                limit?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;

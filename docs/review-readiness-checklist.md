@@ -35,9 +35,14 @@ This file records senior-review gaps found while preparing the project for code 
 
 ## Production Readiness Follow-Ups
 
-- [ ] Add real authentication and derive `Actor` from trusted identity, not request body fields.
-  **Deferred (out of scope):** simulated identity via request body is a documented trade-off.
-  Noted in `specs/05-access.md` and the README.
+- [x] Add real authentication and derive `Actor` from trusted identity, not request body fields.
+  `AuthActor` extractor in `src/interface/http.rs` reads `Authorization: Bearer <token>`,
+  resolves the token against `PRMS_API_KEYS` (a `HashMap<String, String>` built at startup),
+  and returns 401 for missing or unknown tokens. The `actor_id` field was removed from all
+  mutating request DTOs (`CreatePassengerReq`, `ChangeTierReq`, `CreateResourceReq`,
+  `ReplaceCrewLeadReq`, `UseResourceReq`). All HTTP tests updated to use `auth_req` helper
+  with `CL_TOKEN`/`PS_TOKEN` constants. E2E tests require `PRMS_API_KEYS=token:actor-id,...`.
+  README updated to remove the "No real authentication" trade-off note.
 - [x] Add persistent storage with migrations, backups, and append-only event tables.
   SQLite-backed event sinks added (`src/infrastructure/sqlite_event_store.rs`).
   `SqliteUsageEventSink` and `SqliteAdminEventSink` write-through: every `append()`

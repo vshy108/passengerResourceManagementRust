@@ -55,7 +55,7 @@ struct Args {
     #[arg(long, env = "PRMS_ENABLE_RESET", default_value_t = false)]
     enable_reset: bool,
 
-    /// Path to the SQLite database file. When unset, state is in-memory
+    /// Path to the `SQLite` database file. When unset, state is in-memory
     /// only and resets on restart. Set to a persistent path in production
     /// to survive restarts (event logs are durable; entity state is not).
     #[arg(long, env = "PRMS_DB_PATH")]
@@ -79,6 +79,8 @@ struct Args {
 // build the runtime by hand. `ExitCode` lets us return non-zero codes
 // without panicking — cleaner than `process::exit`.
 #[tokio::main]
+#[allow(clippy::too_many_lines)] // main() is setup-heavy by nature — extracting helpers would
+                                  // just scatter one logical flow across many small functions.
 async fn main() -> ExitCode {
     // RUST_LOG=info,tower_http=debug for verbose.
     // tracing-subscriber installs a global logger. `EnvFilter` reads
@@ -125,25 +127,22 @@ async fn main() -> ExitCode {
         }
     };
 
-    let world = match args.db_path.as_deref() {
-        Some(path) => {
-            tracing::info!("SQLite event store: {path}");
-            match build_world_with_sqlite(path) {
-                Ok(w) => w,
-                Err(e) => {
-                    eprintln!("failed to open SQLite database at {path:?}: {e}");
-                    return ExitCode::from(1);
-                }
+    let world = if let Some(path) = args.db_path.as_deref() {
+        tracing::info!("SQLite event store: {path}");
+        match build_world_with_sqlite(path) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("failed to open SQLite database at {path:?}: {e}");
+                return ExitCode::from(1);
             }
         }
-        None => {
-            tracing::info!("Using in-memory event store (set PRMS_DB_PATH for persistence).");
-            match build_demo_world() {
-                Ok(w) => w,
-                Err(e) => {
-                    eprintln!("failed to bootstrap demo world: {e}");
-                    return ExitCode::from(1);
-                }
+    } else {
+        tracing::info!("Using in-memory event store (set PRMS_DB_PATH for persistence).");
+        match build_demo_world() {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("failed to bootstrap demo world: {e}");
+                return ExitCode::from(1);
             }
         }
     };
@@ -177,7 +176,9 @@ async fn main() -> ExitCode {
 
     // Build the router and add request tracing as the OUTERMOST layer
     // (logs every request/response pair).
-    let app = router_with(state, cors, args.enable_reset).layer(TraceLayer::new_for_http());
+    // FIX: rate limiting enabled in production (real server) but not in tests.
+    // In tests all requests share the loopback IP, exhausting the bucket instantly.
+    let app = router_with(state, cors, args.enable_reset, true).layer(TraceLayer::new_for_http());
     if args.enable_reset {
         tracing::warn!(
             "The /reset endpoint is enabled. This wipes all state and must \
@@ -262,7 +263,7 @@ async fn main() -> ExitCode {
 /// FIX: the previous implementation only caught SIGINT via `ctrl_c()`.
 /// Container orchestrators send SIGTERM first and only escalate to SIGKILL
 /// after the grace period. Without catching SIGTERM the server would be
-/// force-killed, potentially leaving the SQLite WAL in an un-checkpointed
+/// force-killed, potentially leaving the `SQLite` WAL in an un-checkpointed
 /// state. This function catches both signals so graceful drain always runs.
 #[allow(dead_code)] // Referenced from the closure inside with_graceful_shutdown
 async fn shutdown_signal() {
@@ -284,7 +285,7 @@ async fn shutdown_signal() {
     let sigterm = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c  => { tracing::info!("SIGINT received") }
-        _ = sigterm => { tracing::info!("SIGTERM received") }
+        () = ctrl_c  => { tracing::info!("SIGINT received") }
+        () = sigterm => { tracing::info!("SIGTERM received") }
     }
 }

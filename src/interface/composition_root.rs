@@ -29,7 +29,7 @@ use crate::infrastructure::sqlite_event_store::{
 // set). Pattern: enum-as-strategy, per AGENTS.md §10 "when a plain enum
 // suffices" for avoiding trait-object towers.
 
-/// Unified usage-event sink/source. Dispatches to in-memory or SQLite.
+/// Unified usage-event sink/source. Dispatches to in-memory or `SQLite`.
 pub enum UsageSink {
     InMemory(InMemoryUsageEventSink),
     #[cfg(feature = "http")]
@@ -57,7 +57,7 @@ impl UsageEventSource for UsageSink {
 }
 
 /// Unified admin-event sink. Cloneable so multiple services share one
-/// buffer. Dispatches to in-memory or SQLite.
+/// buffer. Dispatches to in-memory or `SQLite`.
 #[derive(Clone)]
 pub enum AuditSink {
     InMemory(InMemoryAdminEventSink),
@@ -120,15 +120,15 @@ pub fn build_demo_world() -> Result<World, DomainError> {
     build_world(audit_sink, usage_sink)
 }
 
-/// Build a world backed by SQLite at `db_path`.
+/// Build a world backed by `SQLite` at `db_path`.
 ///
 /// Existing events (from a previous run) are loaded from the database
 /// before the demo entities are seeded. Entity state (passengers,
 /// resources, crew leads) still lives in memory and resets on restart;
 /// only the event logs are persisted.
 ///
-/// Use `":memory:"` for a transient SQLite database (useful for testing
-/// the SQLite adapters directly without touching the filesystem).
+/// Use `":memory:"` for a transient `SQLite` database (useful for testing
+/// the `SQLite` adapters directly without touching the filesystem).
 ///
 /// # Errors
 /// - `rusqlite::Error` (wrapped as `DomainError::StorageError`) if the
