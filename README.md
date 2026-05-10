@@ -236,9 +236,9 @@ so the type system catches mix-ups at compile time. Errors are a single
   drift from the wire format.
 - **Coverage gate at 96% lines** (`src/bin/serve.rs` and SQLite
   infrastructure excluded — they require real I/O). The remaining
-  uncovered lines are infra-only paths (rwlock-poison 503, CORS
-  `Any`-vs-list branching, governor rate-limit block) that cannot
-  be hit without unsafe thread manipulation or production-only config.
+  uncovered lines are infra-only paths (rwlock-poison 503, SQLite failure
+  injection) that cannot be hit without unsafe thread manipulation or
+  OS-level I/O failure simulation.
 
 **Assumptions.**
 - A passenger keeps the same tier between the moment of access and
@@ -289,8 +289,9 @@ Other known constraints:
 
 - State is held behind an `RwLock<World>` — concurrent reads (GET endpoints) proceed
   without blocking each other; writes (POST/PUT/PATCH/DELETE) hold an exclusive lock.
-  This is fine for the demo load, but will not scale beyond a handful of concurrent
-  writers without sharding or an external database.
+  This is fine for the demo load, but scaling concurrent writers would require replacing
+  the in-memory World with a fully database-backed architecture (e.g. PostgreSQL with
+  per-request connections and row-level locking) rather than a global process lock.
 - `POST /reset` is gated by `PRMS_ENABLE_RESET=true` — never enable in production.
 - Bearer tokens are resolved from `PRMS_API_KEYS` at startup; a real deployment would
   back this with a secrets manager and short-lived tokens.
