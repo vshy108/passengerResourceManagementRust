@@ -23,6 +23,11 @@ use tower::ServiceExt;
 
 use http_common::{CL_TOKEN, app, auth_req, req, send};
 
+use std::collections::HashMap;
+
+use passenger_resource_management::interface::composition_root::build_demo_world;
+use passenger_resource_management::interface::http::{AppState, CorsOrigins, router_with};
+
 // `#[tokio::test]` is the async equivalent of `#[test]` — the macro
 // wraps the test in a tokio runtime so we can `.await` futures inside.
 // REQUIRED whenever the test calls async axum/tower code.
@@ -158,6 +163,8 @@ async fn health_ready_returns_entity_counts() {
     let (status, body) = send(&app, req(Method::GET, "/health/ready", None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"].as_str().unwrap(), "ready");
+    // Version field must be present and non-empty (populated from CARGO_PKG_VERSION).
+    assert!(!body["version"].as_str().unwrap_or("").is_empty());
     // Demo world seeds 3 crew leads, 3 passengers, 3 resources.
     assert_eq!(body["crew_leads"].as_u64().unwrap(), 3);
     assert_eq!(body["passengers_active"].as_u64().unwrap(), 3);
@@ -221,4 +228,91 @@ async fn metrics_counts_allowed_and_denied_after_access_events() {
     assert!(text.contains("prms_usage_events_total 2"));
     assert!(text.contains("prms_usage_events_allowed_total 1"));
     assert!(text.contains("prms_usage_events_denied_total 1"));
+}
+
+#[tokio::test]
+async fn security_response_headers_are_set() {
+    // Verifies that every security header injected by router_with()'s
+    // SetResponseHeaderLayer stack is present on a plain GET response.
+    let app = app();
+    let r = req(Method::GET, "/health", None);
+    let res = app.clone().oneshot(r).await.unwrap();
+    let h = res.headers();
+    assert_eq!(h.get("x-content-type-options").unwrap(), "nosniff");
+    assert_eq!(h.get("x-frame-options").unwrap(), "DENY");
+    assert_eq!(h.get("referrer-policy").unwrap(), "no-referrer");
+    // FIX: content-security-policy was missing; added in production-gap pass.
+    // 'default-src none' blocks all browser content sources for this JSON API.
+    assert_eq!(
+        h.get("content-security-policy").unwrap(),
+        "default-src 'none'"
+    );
+    let _ = res.into_body().collect().await.unwrap();
+}
+
+#[tokio::test]
+async fn cors_list_origins_allows_listed_origin() {
+    // FIX: CorsOrigins::List branch in router_with() was never reached by
+    // any test. This test exercises the branch that actually enforces origin
+    // restrictions (http.rs CorsLayer::new().allow_origin(origins) arm).
+    let world = build_demo_world().expect("bootstrap");
+    let api_keys: HashMap<String, String> = [
+        ("test-cl-aria".to_owned(), "cl-aria".to_owned()),
+    ].into();
+    let state = AppState::new(world, api_keys);
+    // Allow only example.com as an origin.
+    let allowed: axum::http::HeaderValue =
+        "http://example.com".parse().unwrap();
+    let list_app = router_with(state, CorsOrigins::List(vec![allowed]), false, false, 10, 50);
+
+    let r = Request::builder()
+        .method(Method::GET)
+        .uri("/health")
+        .header("origin", "http://example.com")
+        .body(Body::empty())
+        .unwrap();
+    let res = list_app.clone().oneshot(r).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    // The CORS middleware echoes the listed origin back on the response.
+    let acao = res.headers().get("access-control-allow-origin");
+    assert_eq!(acao.unwrap(), "http://example.com");
+    let _ = res.into_body().collect().await.unwrap();
+}
+
+#[tokio::test]
+async fn rate_limit_returns_429_after_burst_exhausted() {
+    // FIX: the GovernorLayer rate-limit path (http.rs lines 177-180) was
+    // never tested. With rps=1 and burst=1 the second back-to-back request
+    // to the same loopback IP exhausts the token bucket and returns 429.
+    let world = build_demo_world().expect("bootstrap");
+    let state = AppState::new(world, HashMap::new());
+    // enable_rate_limit=true, rps=1, burst=1 — strict bucket for testing.
+    let rate_app = router_with(state, CorsOrigins::Any, false, true, 1, 1);
+
+    // FIX: tower's oneshot provides no real TCP socket, so PeerIpKeyExtractor
+    // cannot find a SocketAddr. Inject ConnectInfo<SocketAddr> as a request
+    // extension — the same mechanism axum's IntoMakeServiceWithConnectInfo
+    // uses for real connections — so the governor has a valid IP to key on.
+    let make_req = || {
+        use axum::extract::ConnectInfo;
+        use std::net::SocketAddr;
+        let mut r = Request::builder()
+            .method(Method::GET)
+            .uri("/health")
+            .body(Body::empty())
+            .unwrap();
+        r.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))));
+        r
+    };
+
+    // First request — consumes the single burst token and succeeds.
+    let res1 = rate_app.clone().oneshot(make_req()).await.unwrap();
+    assert_eq!(res1.status(), StatusCode::OK);
+    let _ = res1.into_body().collect().await.unwrap();
+
+    // Second immediate request — bucket is empty, must be rate-limited.
+    let res2 = rate_app.clone().oneshot(make_req()).await.unwrap();
+    assert_eq!(res2.status(), StatusCode::TOO_MANY_REQUESTS);
+    let _ = res2.into_body().collect().await.unwrap();
 }

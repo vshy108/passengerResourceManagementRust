@@ -289,6 +289,15 @@ pub fn router_with(
             axum::http::header::HeaderName::from_static("referrer-policy"),
             axum::http::HeaderValue::from_static("no-referrer"),
         ))
+        // FIX: Content-Security-Policy instructs browsers to block all
+        // content sources (OWASP A05). A JSON API has no scripts, styles,
+        // or media of its own; "default-src 'none'" is the strictest safe
+        // value and prevents browsers from executing injected content if
+        // a response is ever rendered as HTML by a misbehaving client.
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::HeaderName::from_static("content-security-policy"),
+            axum::http::HeaderValue::from_static("default-src 'none'"),
+        ))
 }
 
 // ---------- error mapping ----------------------------------------------
@@ -467,6 +476,8 @@ async fn health_ready(State(state): State<AppState>) -> Response {
             }
             Json(HealthReadyDto {
                 status: "ready".into(),
+                // env!() is resolved at compile time — zero runtime cost.
+                version: env!("CARGO_PKG_VERSION").to_owned(),
                 crew_leads: w.crew_leads.list().len(),
                 passengers_active: w.passengers.list().len(),
                 resources_active: w.resources.list().len(),

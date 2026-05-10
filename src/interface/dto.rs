@@ -424,6 +424,8 @@ pub struct ErrorBody {
 pub struct HealthReadyDto {
     /// Always `"ready"` on a 200 response.
     pub status: String,
+    /// Semver of the running binary, e.g. `"1.0.0"`.
+    pub version: String,
     pub crew_leads: usize,
     pub passengers_active: usize,
     pub resources_active: usize,
