@@ -23,8 +23,7 @@
 
 use std::collections::HashMap;
 
-use axum::
-{
+use axum::{
     Router,
     body::Body,
     http::{Method, Request, StatusCode},
@@ -41,7 +40,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use passenger_resource_management::interface::composition_root::build_demo_world;
-use passenger_resource_management::interface::http::{AppState, router_with, CorsOrigins};
+use passenger_resource_management::interface::http::{AppState, CorsOrigins, router_with};
 
 // `pub const` — a compile-time constant, inlined at every use site.
 // Convention: SCREAMING_SNAKE_CASE.
@@ -113,12 +112,7 @@ pub fn req(method: Method, path: &str, body: Option<Value>) -> Request<Body> {
 
 /// Build a `Request<Body>` with an `Authorization: Bearer <token>` header.
 /// Use this for all mutating endpoints (they require authentication now).
-pub fn auth_req(
-    method: Method,
-    path: &str,
-    token: &str,
-    body: Option<Value>,
-) -> Request<Body> {
+pub fn auth_req(method: Method, path: &str, token: &str, body: Option<Value>) -> Request<Body> {
     let mut b = Request::builder()
         .method(method)
         .uri(path)

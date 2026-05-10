@@ -179,12 +179,7 @@ async fn metrics_returns_prometheus_text() {
     let r = req(Method::GET, "/metrics", None);
     let res = app.clone().oneshot(r).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let ct = res
-        .headers()
-        .get("content-type")
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let ct = res.headers().get("content-type").unwrap().to_str().unwrap();
     assert!(ct.contains("text/plain"));
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let text = std::str::from_utf8(&bytes).unwrap();
@@ -256,14 +251,19 @@ async fn cors_list_origins_allows_listed_origin() {
     // any test. This test exercises the branch that actually enforces origin
     // restrictions (http.rs CorsLayer::new().allow_origin(origins) arm).
     let world = build_demo_world().expect("bootstrap");
-    let api_keys: HashMap<String, String> = [
-        ("test-cl-aria".to_owned(), "cl-aria".to_owned()),
-    ].into();
+    let api_keys: HashMap<String, String> =
+        [("test-cl-aria".to_owned(), "cl-aria".to_owned())].into();
     let state = AppState::new(world, api_keys);
     // Allow only example.com as an origin.
-    let allowed: axum::http::HeaderValue =
-        "http://example.com".parse().unwrap();
-    let list_app = router_with(state, CorsOrigins::List(vec![allowed]), false, false, 10, 50);
+    let allowed: axum::http::HeaderValue = "http://example.com".parse().unwrap();
+    let list_app = router_with(
+        state,
+        CorsOrigins::List(vec![allowed]),
+        false,
+        false,
+        10,
+        50,
+    );
 
     let r = Request::builder()
         .method(Method::GET)

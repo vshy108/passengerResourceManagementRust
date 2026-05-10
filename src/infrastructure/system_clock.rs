@@ -42,7 +42,10 @@ mod tests {
         // Any value > 0 means the clock returned a real Unix-epoch nanos value
         // (year 1970+). Timestamp(0) would indicate clock saturation on a
         // misconfigured system — which would be a very different problem.
-        assert!(t.0 > 0, "SystemClock::now() returned a non-positive timestamp");
+        assert!(
+            t.0 > 0,
+            "SystemClock::now() returned a non-positive timestamp"
+        );
     }
 
     #[test]
@@ -50,6 +53,9 @@ mod tests {
         let t1 = SystemClock.now();
         let t2 = SystemClock.now();
         // t2 must be >= t1: wall-clock time never goes backwards within a process.
-        assert!(t2.0 >= t1.0, "second call returned an earlier timestamp than first");
+        assert!(
+            t2.0 >= t1.0,
+            "second call returned an earlier timestamp than first"
+        );
     }
 }

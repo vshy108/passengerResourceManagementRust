@@ -159,11 +159,7 @@ async fn delete_unknown_resource_returns_404() {
 async fn list_resources_pagination_offset_and_limit() {
     let app = app();
     // Seeded world has 3 resources. offset=1&limit=1 should return exactly 1.
-    let (status, body) = send(
-        &app,
-        req(Method::GET, "/resources?offset=1&limit=1", None),
-    )
-    .await;
+    let (status, body) = send(&app, req(Method::GET, "/resources?offset=1&limit=1", None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_array().unwrap().len(), 1);
 }
@@ -199,7 +195,9 @@ async fn create_resource_oversized_id_returns_400() {
             Method::POST,
             "/resources",
             CL_TOKEN,
-            Some(json!({"id": long_id, "name": "Valid", "category": "lounge", "min_tier": "Silver"})),
+            Some(
+                json!({"id": long_id, "name": "Valid", "category": "lounge", "min_tier": "Silver"}),
+            ),
         ),
     )
     .await;
@@ -218,7 +216,9 @@ async fn create_resource_empty_name_returns_400() {
             Method::POST,
             "/resources",
             CL_TOKEN,
-            Some(json!({"id": "res-noname", "name": "", "category": "lounge", "min_tier": "Silver"})),
+            Some(
+                json!({"id": "res-noname", "name": "", "category": "lounge", "min_tier": "Silver"}),
+            ),
         ),
     )
     .await;
@@ -333,7 +333,8 @@ async fn create_resource_idempotency_key_deduplicates_retry() {
     // FIX: exercises the idempotency cache-hit path in `create_resource`
     // (http.rs lines 735-738): when the same Idempotency-Key is sent twice,
     // the second call must return the cached 201 without running domain logic.
-    let payload = json!({"id": "res-idem", "name": "Idem Zone", "category": "lounge", "min_tier": "Silver"});
+    let payload =
+        json!({"id": "res-idem", "name": "Idem Zone", "category": "lounge", "min_tier": "Silver"});
 
     let make_req = || {
         Request::builder()
@@ -354,8 +355,15 @@ async fn create_resource_idempotency_key_deduplicates_retry() {
     // Second call with the SAME key — must return cached 201, not 409 Conflict.
     // This exercises the `idempotency_get` cache-hit return branch (lines 735-738).
     let (s2, b2) = send(&app, make_req()).await;
-    assert_eq!(s2, StatusCode::CREATED, "retry with same key must return 201");
-    assert_eq!(b1, b2, "retry response body must be identical to first response");
+    assert_eq!(
+        s2,
+        StatusCode::CREATED,
+        "retry with same key must return 201"
+    );
+    assert_eq!(
+        b1, b2,
+        "retry response body must be identical to first response"
+    );
 
     // Confirm only ONE resource was created (domain logic ran exactly once).
     let (_, list) = send(&app, req(Method::GET, "/resources", None)).await;

@@ -30,10 +30,7 @@ impl<C: Clock, S: UsageEventSink> AccessService<C, S> {
     pub fn new(clock: C, sink: S) -> Self {
         // Struct literal syntax. Field shorthand `clock` is shorthand
         // for `clock: clock` (param name == field name).
-        Self {
-            clock,
-            sink,
-        }
+        Self { clock, sink }
     }
 
     #[must_use]

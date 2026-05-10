@@ -193,8 +193,13 @@ fn ps_s12_passenger_actor_cannot_soft_delete() {
     // passenger_service.rs line 144 is the UnauthorizedActor path.
     // No existing test called soft_delete with a non-crew-lead actor.
     let mut svc = svc();
-    svc.create(&admin(), PassengerId::from("p1"), "Alice".into(), Tier::Silver)
-        .unwrap();
+    svc.create(
+        &admin(),
+        PassengerId::from("p1"),
+        "Alice".into(),
+        Tier::Silver,
+    )
+    .unwrap();
     let res = svc.soft_delete(&passenger_actor(), &PassengerId::from("p1"));
     assert_eq!(res, Err(DomainError::UnauthorizedActor));
 }

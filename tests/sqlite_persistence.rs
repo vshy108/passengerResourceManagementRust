@@ -30,7 +30,11 @@ fn entity_state_survives_restart_via_sqlite() {
     {
         let mut world = build_world_with_sqlite(db_str).expect("run 1 world build failed");
         // Verify seeded demo data is present.
-        assert_eq!(world.passengers.list().len(), 3, "run 1 should have 3 passengers");
+        assert_eq!(
+            world.passengers.list().len(),
+            3,
+            "run 1 should have 3 passengers"
+        );
 
         // Mutate: change tier of ps-001.
         let admin = Actor::CrewLead(CrewLeadId("cl-aria".into()));
@@ -56,16 +60,31 @@ fn entity_state_survives_restart_via_sqlite() {
         let world2 = build_world_with_sqlite(db_str).expect("run 2 world build failed");
 
         // Crew leads restored (3 unchanged).
-        assert_eq!(world2.crew_leads.list().len(), 3, "run 2 should still have 3 crew leads");
+        assert_eq!(
+            world2.crew_leads.list().len(),
+            3,
+            "run 2 should still have 3 crew leads"
+        );
 
         // Passengers restored with updated tier.
         let pax = world2.passengers.list();
         assert_eq!(pax.len(), 3, "active passenger count unchanged");
-        let ps001 = pax.iter().find(|p| p.id.0 == "ps-001").expect("ps-001 missing");
-        assert_eq!(ps001.tier, Tier::Gold, "tier change should have been persisted");
+        let ps001 = pax
+            .iter()
+            .find(|p| p.id.0 == "ps-001")
+            .expect("ps-001 missing");
+        assert_eq!(
+            ps001.tier,
+            Tier::Gold,
+            "tier change should have been persisted"
+        );
 
         // Resources: res-lounge was soft-deleted, so active list has 2.
-        assert_eq!(world2.resources.list().len(), 2, "soft-deleted resource excluded from active list");
+        assert_eq!(
+            world2.resources.list().len(),
+            2,
+            "soft-deleted resource excluded from active list"
+        );
         // Soft-deleted is still resolvable.
         world2
             .resources

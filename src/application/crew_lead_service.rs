@@ -76,7 +76,11 @@ impl CrewLeadService {
     /// Attach an audit configuration for future write operations.
     /// Used after `restore()` to enable auditing without replaying bootstrap events.
     #[must_use]
-    pub fn with_future_audit(mut self, clock: Box<dyn Clock>, sink: Box<dyn AdminEventSink>) -> Self {
+    pub fn with_future_audit(
+        mut self,
+        clock: Box<dyn Clock>,
+        sink: Box<dyn AdminEventSink>,
+    ) -> Self {
         self.audit = Some(AuditCfg { clock, sink });
         self
     }
@@ -153,10 +157,7 @@ impl CrewLeadService {
         // function returns that Err immediately. Otherwise the Ok value
         // is unwrapped into `svc`.
         let mut svc = Self::bootstrap(leads)?;
-        let mut audit = AuditCfg {
-            clock,
-            sink,
-        };
+        let mut audit = AuditCfg { clock, sink };
         // Use the first lead as the acting Crew Lead for the bootstrap
         // event; this is a synthetic but stable choice (AU-R2 only
         // requires `actor_id` be a Crew Lead id).

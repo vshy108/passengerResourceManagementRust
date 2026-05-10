@@ -207,7 +207,10 @@ impl SqliteUsageEventSink {
     /// `rusqlite::Error` if hydration query fails.
     pub fn open(conn: Connection) -> rusqlite::Result<Self> {
         let cache = Self::load(&conn)?;
-        Ok(Self { conn: Mutex::new(conn), cache })
+        Ok(Self {
+            conn: Mutex::new(conn),
+            cache,
+        })
     }
 
     fn load(conn: &Connection) -> rusqlite::Result<Vec<UsageEvent>> {
@@ -404,7 +407,9 @@ pub struct SqliteEntityStore {
 impl SqliteEntityStore {
     /// Wrap an already-opened connection (from `open_db`).
     pub fn new(conn: Connection) -> Self {
-        Self { conn: Mutex::new(conn) }
+        Self {
+            conn: Mutex::new(conn),
+        }
     }
 
     /// Returns `true` if the `crew_leads` table is empty (i.e. this is
@@ -454,9 +459,8 @@ impl SqliteEntityStore {
         Vec<crate::domain::passenger::Passenger>,
     )> {
         let conn = self.conn.lock().expect("entity store conn mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, name, tier, deleted_at FROM passengers ORDER BY rowid ASC",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id, name, tier, deleted_at FROM passengers ORDER BY rowid ASC")?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -563,7 +567,12 @@ impl SqliteEntityStore {
         for p in active.iter().chain(deleted.iter()) {
             conn.execute(
                 "INSERT INTO passengers (id, name, tier, deleted_at) VALUES (?1, ?2, ?3, ?4)",
-                params![p.id.0, p.name, tier_to_str(p.tier), p.deleted_at.map(|t| t.0)],
+                params![
+                    p.id.0,
+                    p.name,
+                    tier_to_str(p.tier),
+                    p.deleted_at.map(|t| t.0)
+                ],
             )
             .expect("sqlite passengers INSERT failed");
         }
@@ -633,7 +642,12 @@ impl SqliteEntityStore {
         for p in active_pax.iter().chain(deleted_pax.iter()) {
             conn.execute(
                 "INSERT INTO passengers (id, name, tier, deleted_at) VALUES (?1, ?2, ?3, ?4)",
-                params![p.id.0, p.name, tier_to_str(p.tier), p.deleted_at.map(|t| t.0)],
+                params![
+                    p.id.0,
+                    p.name,
+                    tier_to_str(p.tier),
+                    p.deleted_at.map(|t| t.0)
+                ],
             )
             .expect("sqlite passengers INSERT failed");
         }
@@ -649,8 +663,7 @@ impl SqliteEntityStore {
             .expect("sqlite resources INSERT failed");
         }
 
-        conn.execute_batch("COMMIT")
-            .expect("sqlite COMMIT failed");
+        conn.execute_batch("COMMIT").expect("sqlite COMMIT failed");
     }
 
     /// Verify database connectivity with a trivial query.
@@ -791,7 +804,11 @@ mod tests {
 
     #[test]
     fn round_trip_all_kinds() {
-        for kind in [TargetKind::CrewLead, TargetKind::Passenger, TargetKind::Resource] {
+        for kind in [
+            TargetKind::CrewLead,
+            TargetKind::Passenger,
+            TargetKind::Resource,
+        ] {
             assert_eq!(kind_from_str(kind_to_str(kind)).unwrap(), kind);
         }
     }

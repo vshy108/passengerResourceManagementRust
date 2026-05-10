@@ -280,6 +280,9 @@ fn au_s12_admin_event_dto_serialises_crew_lead_added_and_removed() {
             details: None,
         };
         let dto = AdminEventDto::from(&event);
-        assert_eq!(dto.action, expected_str, "action string mismatch for {action:?}");
+        assert_eq!(
+            dto.action, expected_str,
+            "action string mismatch for {action:?}"
+        );
     }
 }

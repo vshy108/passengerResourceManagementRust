@@ -64,9 +64,9 @@ impl Tier {
             // No semicolon at the end of an arm's expression — it's the
             // value yielded by that arm, and the whole `match` becomes
             // the function's return value (no explicit `return` needed).
-            Tier::Silver   => 1,
-            Tier::Gold     => 2,
-            Tier::Diamond  => 3,
+            Tier::Silver => 1,
+            Tier::Gold => 2,
+            Tier::Diamond => 3,
             Tier::Platinum => 4,
         }
     }
@@ -89,9 +89,9 @@ impl Tier {
 /// other changes. You still need to add the variant above and a `rank()` arm
 /// (the compiler will point at both).
 const TIER_NAMES: &[(&str, Tier)] = &[
-    ("Silver",   Tier::Silver),
-    ("Gold",     Tier::Gold),
-    ("Diamond",  Tier::Diamond),
+    ("Silver", Tier::Silver),
+    ("Gold", Tier::Gold),
+    ("Diamond", Tier::Diamond),
     ("Platinum", Tier::Platinum),
 ];
 

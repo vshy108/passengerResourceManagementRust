@@ -20,11 +20,7 @@ async fn reset_replaces_state_with_fresh_demo_world() {
     let (_, before) = send(&app, req(Method::GET, "/passengers", None)).await;
     assert_eq!(before.as_array().unwrap().len(), 2);
 
-    let (status, _) = send(
-        &app,
-        auth_req(Method::POST, "/reset", CL_TOKEN, None),
-    )
-    .await;
+    let (status, _) = send(&app, auth_req(Method::POST, "/reset", CL_TOKEN, None)).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
     let (_, after) = send(&app, req(Method::GET, "/passengers", None)).await;

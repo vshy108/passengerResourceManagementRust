@@ -270,11 +270,7 @@ async fn create_passenger_oversized_name_returns_400() {
 async fn list_passengers_pagination_offset_and_limit() {
     let app = app();
     // Seeded world has 3 passengers. offset=1&limit=1 should return exactly 1.
-    let (status, body) = send(
-        &app,
-        req(Method::GET, "/passengers?offset=1&limit=1", None),
-    )
-    .await;
+    let (status, body) = send(&app, req(Method::GET, "/passengers?offset=1&limit=1", None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_array().unwrap().len(), 1);
 }
@@ -294,9 +290,7 @@ async fn create_passenger_idempotency_key_deduplicates_retry() {
             .header("authorization", format!("Bearer {CL_TOKEN}"))
             .header("content-type", "application/json")
             .header("idempotency-key", "idem-key-ps-idem")
-            .body(Body::from(
-                serde_json::to_vec(&payload).expect("json"),
-            ))
+            .body(Body::from(serde_json::to_vec(&payload).expect("json")))
             .expect("request")
     };
 
@@ -308,8 +302,15 @@ async fn create_passenger_idempotency_key_deduplicates_retry() {
     // Second call with the SAME key — must return the cached 201, not 409 Conflict.
     // This proves the idempotency cache is checked before domain logic runs.
     let (s2, b2) = send(&app, make_req()).await;
-    assert_eq!(s2, StatusCode::CREATED, "retry with same key must return 201, not 409");
-    assert_eq!(b1, b2, "retry response body must be identical to first response");
+    assert_eq!(
+        s2,
+        StatusCode::CREATED,
+        "retry with same key must return 201, not 409"
+    );
+    assert_eq!(
+        b1, b2,
+        "retry response body must be identical to first response"
+    );
 
     // Confirm only ONE passenger was created (domain logic ran exactly once).
     let (_, list) = send(&app, req(Method::GET, "/passengers", None)).await;
@@ -335,9 +336,7 @@ async fn create_passenger_different_idempotency_key_is_independent() {
             .header("authorization", format!("Bearer {CL_TOKEN}"))
             .header("content-type", "application/json")
             .header("idempotency-key", key)
-            .body(Body::from(
-                serde_json::to_vec(&payload).expect("json"),
-            ))
+            .body(Body::from(serde_json::to_vec(&payload).expect("json")))
             .expect("request")
     };
 

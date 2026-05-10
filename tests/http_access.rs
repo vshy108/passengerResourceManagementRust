@@ -57,7 +57,12 @@ async fn access_empty_resource_id_returns_400() {
     // and the `bad_request` path in the `use_resource` handler (http.rs line 824).
     let (status, body) = send(
         &app,
-        auth_req(Method::POST, "/access", PS_TOKEN, Some(json!({"resource_id": ""}))),
+        auth_req(
+            Method::POST,
+            "/access",
+            PS_TOKEN,
+            Some(json!({"resource_id": ""})),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -72,7 +77,12 @@ async fn access_oversized_resource_id_returns_400() {
     let long_id = "r".repeat(256);
     let (status, body) = send(
         &app,
-        auth_req(Method::POST, "/access", PS_TOKEN, Some(json!({"resource_id": long_id}))),
+        auth_req(
+            Method::POST,
+            "/access",
+            PS_TOKEN,
+            Some(json!({"resource_id": long_id})),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
