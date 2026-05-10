@@ -187,9 +187,9 @@ and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
 
 - Rust 2024, stable channel pinned in [`rust-toolchain.toml`](./rust-toolchain.toml)
 - `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
-- Coverage: `cargo llvm-cov nextest --features http --ignore-filename-regex 'src/bin/|sqlite_event_store'`
-  — 96%+ line coverage; CI fails below 96. The `serve`
-  binary entrypoint and SQLite glue are excluded (they boot real I/O).
+- Coverage: `cargo llvm-cov nextest --features http --ignore-filename-regex 'src/bin/'`
+  — 96%+ line coverage; CI fails below 96. Only the `serve` binary entrypoint
+  is excluded (it boots real I/O and is not meaningfully testable in unit tests).
 - CI: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs fmt, clippy
   (default + `--features http`), nextest (default + `--features http`), and
   the web build on every push and PR.

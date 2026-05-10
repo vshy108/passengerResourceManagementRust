@@ -32,8 +32,9 @@ This file records senior-review gaps found while preparing the project for code 
   Decision: gate at **96%** lines (CI: `--fail-under-lines 96`). The uncovered lines are
   infrastructure glue (mutex-poison 503 path, CORS `Any`/`List` branch, governor rate-limit
   block, SQLite failure paths) that are impractical to hit without unsafe thread manipulation
-  or OS-level I/O failure injection. Both `src/bin/` and `sqlite_event_store` are excluded
-  from the measurement. Current achieved: **96.51%** (182 tests, all green).
+  or OS-level I/O failure injection. Only `src/bin/` is excluded from the measurement;
+  `sqlite_event_store` is covered via `tests/sqlite_persistence.rs`. Current achieved:
+  **96.51%** (182 tests, all green).
 
 ## Production Readiness Follow-Ups
 
