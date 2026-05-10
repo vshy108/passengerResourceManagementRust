@@ -88,6 +88,7 @@ jobs:
         run: |
           PRMS_API_KEYS='cl-aria-e2e-token:cl-aria,ps-001-token:ps-001' \
           PRMS_ENABLE_RESET=true \
+          PRMS_ENABLE_RATE_LIMIT=false \
           ./target/release/serve &
           # Wait until the health endpoint responds.
           for i in $(seq 1 20); do

@@ -10,6 +10,9 @@
 //!   allowed origins. When unset, CORS allows any origin (dev default).
 //! - `--enable-reset` / `PRMS_ENABLE_RESET` — register the `/reset` route
 //!   (default: false). Never enable this in production.
+//! - `--enable-rate-limit` / `PRMS_ENABLE_RATE_LIMIT` — enable per-IP rate
+//!   limiting (default: true). Set to `false` in test/e2e environments where
+//!   all requests share the loopback IP and would exhaust the token bucket.
 //! - `--shutdown-grace-secs` / `PRMS_SHUTDOWN_GRACE_SECS` (default 10)
 
 use std::collections::HashMap;
@@ -80,6 +83,12 @@ struct Args {
     /// When unset, ALL authenticated endpoints return 401.
     #[arg(long, env = "PRMS_API_KEYS")]
     api_keys: Option<String>,
+
+    /// Enable per-IP rate limiting. Default `true` (production-safe).
+    /// Set `PRMS_ENABLE_RATE_LIMIT=false` in e2e / integration test environments
+    /// where all requests share the loopback IP and would exhaust the bucket.
+    #[arg(long, env = "PRMS_ENABLE_RATE_LIMIT", default_value_t = true)]
+    enable_rate_limit: bool,
 
     /// Tokens replenished per second per IP for the rate limiter.
     /// Lower values are stricter. Must be >= 1.
@@ -237,13 +246,14 @@ async fn main() -> ExitCode {
 
     // Build the router and add request tracing as the OUTERMOST layer
     // (logs every request/response pair).
-    // FIX: rate limiting enabled in production (real server) but not in tests.
-    // In tests all requests share the loopback IP, exhausting the bucket instantly.
+    // FIX: rate limiting is now configurable via PRMS_ENABLE_RATE_LIMIT (default
+    // true). E2e test environments set it to false because all Playwright
+    // requests originate from 127.0.0.1 and would exhaust the per-IP bucket.
     let app = router_with(
         state,
         cors,
         args.enable_reset,
-        true,
+        args.enable_rate_limit,
         args.rate_limit_rps,
         args.rate_limit_burst,
     )
