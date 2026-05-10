@@ -12,7 +12,9 @@ mod http_common;
 use axum::http::{Method, StatusCode};
 use serde_json::json;
 
-use http_common::{CL_TOKEN, PS_TOKEN, app, auth_req, auth_req_if_match, req, send, send_full};
+use http_common::{
+    ARIA, CL_TOKEN, PS_TOKEN, app, auth_req, auth_req_if_match, req, send, send_full,
+};
 
 // ── #9 API versioning ────────────────────────────────────────────────────────
 
@@ -317,6 +319,62 @@ async fn audit_verify_via_v1_also_works() {
     let (status, body) = send(&app, req(Method::GET, "/v1/audit/verify", None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["valid"], true);
+}
+
+/// Cover the `broken_at` branch in `verify_audit_chain` (http.rs lines 1226-1227).
+///
+/// Strategy: clone the `InMemoryAdminEventSink` Arc *before* moving the `World`
+/// into `AppState`. Both handles share the same underlying `Arc<Mutex<…>>`, so
+/// corrupting a hash through the clone is immediately visible to the handler.
+#[tokio::test]
+async fn audit_verify_detects_tampered_hash() {
+    use std::collections::HashMap;
+
+    use passenger_resource_management::infrastructure::in_memory_admin_event_sink::InMemoryAdminEventSink;
+    use passenger_resource_management::interface::composition_root::{AuditSink, build_demo_world};
+    use passenger_resource_management::interface::http::{AppState, CorsOrigins, router_with};
+
+    let world = build_demo_world().expect("bootstrap");
+
+    // Clone the sink *before* consuming `world`. Arc clone is a pointer bump —
+    // both handles share the same backing store.
+    let sink_clone: InMemoryAdminEventSink = match &world.audit_sink {
+        AuditSink::InMemory(s) => s.clone(),
+        AuditSink::Sqlite(_) => panic!("expected InMemory audit sink in demo world"),
+    };
+
+    let api_keys: HashMap<String, String> = [(CL_TOKEN.to_owned(), ARIA.to_owned())].into();
+    let state = AppState::new(world, api_keys);
+    let app = router_with(state, CorsOrigins::Any, false, false, 10, 50);
+
+    // Sanity-check: chain is valid before tampering.
+    let (_, body) = send(&app, req(Method::GET, "/audit/verify", None)).await;
+    assert_eq!(
+        body["valid"], true,
+        "chain should be valid before tampering"
+    );
+    let chain_len = body["length"].as_u64().unwrap();
+    assert!(chain_len >= 1);
+
+    // Corrupt the stored hash of the first event so the verifier disagrees.
+    // FIX: corrupt_hash_at is a #[cfg(test)]-only method on InMemoryAdminEventSink.
+    // It writes directly to the shared Arc<Mutex<Vec<String>>>, so the next
+    // call to verify_audit_chain (which reads via snapshot_with_hashes) sees
+    // the corrupted value immediately.
+    sink_clone.corrupt_hash_at(0, "deadbeefdeadbeef");
+
+    // Chain must now be reported as invalid.
+    let (status, body) = send(&app, req(Method::GET, "/audit/verify", None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["valid"], false,
+        "chain should be invalid after tampering"
+    );
+    assert_eq!(
+        body["broken_at"].as_u64(),
+        Some(0),
+        "broken_at should point to the first corrupted event"
+    );
 }
 
 #[tokio::test]

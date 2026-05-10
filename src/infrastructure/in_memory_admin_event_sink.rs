@@ -124,6 +124,29 @@ impl InMemoryAdminEventSink {
         self.inner.lock().expect("admin sink mutex poisoned").len()
     }
 
+    /// Overwrite the stored hash at `index` with `bad_hash`.
+    ///
+    /// Only compiled when the `http` feature is active (the hash chain itself
+    /// is gated the same way). Used in integration tests to simulate a tampered
+    /// audit log, driving `GET /audit/verify` down its `broken_at` path.
+    ///
+    /// # Panics
+    /// Panics if the inner hashes mutex is poisoned.
+    #[cfg(feature = "http")]
+    pub fn corrupt_hash_at(&self, index: usize, bad_hash: &str) {
+        let mut hashes = self
+            .hashes
+            .lock()
+            .expect("admin sink hashes mutex poisoned");
+        if let Some(h) = hashes.get_mut(index) {
+            // FIX: avoid clippy::assigning_clones — write via `String::clear` +
+            // `push_str` so we reuse the existing allocation rather than
+            // creating a new `String` via `to_owned()` and dropping the old one.
+            h.clear();
+            h.push_str(bad_hash);
+        }
+    }
+
     /// # Panics
     /// See [`snapshot`].
     // Clippy enforces: any type with `len()` should also have `is_empty()`.
