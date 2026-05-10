@@ -150,7 +150,7 @@ pub fn auth_req_if_match(
     b.body(body).expect("request")
 }
 
-/// Send a request and also return the response headers (for ETag inspection).
+/// Send a request and also return the response headers (for `ETag` inspection).
 pub async fn send_full(
     app: &Router,
     req: Request<Body>,

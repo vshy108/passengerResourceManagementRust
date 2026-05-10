@@ -108,9 +108,9 @@ fn entity_state_survives_restart_via_sqlite() {
     let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
 }
 
-/// Exercises the UsageSink::Sqlite arm by calling AccessService::use_resource
-/// on a SQLite-backed world. This covers composition_root.rs lines 50 and 62
-/// (UsageSink::Sqlite dispatch in append() and list()).
+/// Exercises the `UsageSink::Sqlite` arm by calling `AccessService::use_resource`
+/// on a SQLite-backed world. This covers `composition_root.rs` lines 50 and 62
+/// (`UsageSink::Sqlite` dispatch in `append()` and `list()`).
 #[cfg(feature = "http")]
 #[test]
 fn sqlite_usage_sink_records_access_events() {
