@@ -13,7 +13,8 @@ use axum::http::{Method, StatusCode};
 use serde_json::json;
 
 use http_common::{
-    ARIA, CL_TOKEN, PS_TOKEN, app, auth_req, auth_req_if_match, req, send, send_full,
+    ARIA, CL_TOKEN, PS_TOKEN, app, auth_req, auth_req_idempotent, auth_req_if_match, req, send,
+    send_full,
 };
 
 // ── #9 API versioning ────────────────────────────────────────────────────────
@@ -451,4 +452,81 @@ async fn health_ready_returns_200_for_in_memory_world() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ready");
     assert_eq!(body["crew_leads"], 3);
+}
+
+// ── Idempotency-Key ───────────────────────────────────────────────────────────
+
+/// Second POST with the same `Idempotency-Key` must return the cached 201
+/// body without creating a duplicate passenger.
+#[tokio::test]
+async fn create_passenger_idempotency_key_replays_cached_201() {
+    let app = app();
+    let key = "idem-key-abc-123";
+
+    // First call: new passenger created → 201.
+    let (s1, b1) = send(
+        &app,
+        auth_req_idempotent(
+            "/passengers",
+            CL_TOKEN,
+            key,
+            Some(json!({"id": "ps-idem-1", "name": "Idem Test", "tier": "Silver"})),
+        ),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::CREATED);
+    assert_eq!(b1["id"], "ps-idem-1");
+
+    // Second call with same key but deliberately different body.
+    // The handler must return the cached response, NOT process the new body.
+    let (s2, b2) = send(
+        &app,
+        auth_req_idempotent(
+            "/passengers",
+            CL_TOKEN,
+            key,
+            Some(json!({"id": "ps-idem-DIFFERENT", "name": "Should Not Create", "tier": "Gold"})),
+        ),
+    )
+    .await;
+    // Status and body identical to the first response (replay).
+    assert_eq!(s2, StatusCode::CREATED);
+    assert_eq!(
+        b2["id"], "ps-idem-1",
+        "cached body must be returned, not the second request body"
+    );
+
+    // Only one new passenger was created: the demo world has 3 + 1 = 4.
+    let (_, list) = send(&app, req(Method::GET, "/passengers", None)).await;
+    assert_eq!(
+        list.as_array().unwrap().len(),
+        4,
+        "duplicate must not have been created"
+    );
+}
+
+/// A request WITHOUT an `Idempotency-Key` must never be cached: two identical
+/// requests should produce two independent 201 responses and two passengers.
+#[tokio::test]
+async fn create_passenger_without_idempotency_key_is_not_cached() {
+    let app = app();
+    let body1 = json!({"id": "ps-no-idem-1", "name": "First", "tier": "Silver"});
+    let body2 = json!({"id": "ps-no-idem-2", "name": "Second", "tier": "Gold"});
+
+    let (s1, _) = send(
+        &app,
+        auth_req(Method::POST, "/passengers", CL_TOKEN, Some(body1)),
+    )
+    .await;
+    let (s2, _) = send(
+        &app,
+        auth_req(Method::POST, "/passengers", CL_TOKEN, Some(body2)),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::CREATED);
+    assert_eq!(s2, StatusCode::CREATED);
+
+    let (_, list) = send(&app, req(Method::GET, "/passengers", None)).await;
+    // 3 seeded + 2 new = 5.
+    assert_eq!(list.as_array().unwrap().len(), 5);
 }

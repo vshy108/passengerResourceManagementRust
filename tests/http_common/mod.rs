@@ -150,6 +150,28 @@ pub fn auth_req_if_match(
     b.body(body).expect("request")
 }
 
+/// Build an authenticated POST request with an `Idempotency-Key` header.
+pub fn auth_req_idempotent(
+    path: &str,
+    token: &str,
+    idempotency_key: &str,
+    body: Option<Value>,
+) -> Request<Body> {
+    let mut b = Request::builder()
+        .method(Method::POST)
+        .uri(path)
+        .header("authorization", format!("Bearer {token}"))
+        .header("idempotency-key", idempotency_key);
+    let body = match body {
+        Some(v) => {
+            b = b.header("content-type", "application/json");
+            Body::from(serde_json::to_vec(&v).expect("json"))
+        }
+        None => Body::empty(),
+    };
+    b.body(body).expect("request")
+}
+
 /// Send a request and also return the response headers (for `ETag` inspection).
 pub async fn send_full(
     app: &Router,
