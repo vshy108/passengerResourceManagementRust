@@ -5,11 +5,20 @@
 //
 // Spec ref: P10 — entity persistence.
 
+// All items in this file require the `http` feature (build_world_with_sqlite
+// is gated behind it). The `use` declarations are inside the cfg block so
+// `cargo nextest run` (no features) does not fail with E0432.
+#[cfg(feature = "http")]
 use passenger_resource_management::domain::actor::Actor;
+#[cfg(feature = "http")]
 use passenger_resource_management::domain::crew_lead::CrewLeadId;
+#[cfg(feature = "http")]
 use passenger_resource_management::domain::passenger::PassengerId;
+#[cfg(feature = "http")]
 use passenger_resource_management::domain::resource::ResourceId;
+#[cfg(feature = "http")]
 use passenger_resource_management::domain::tier::Tier;
+#[cfg(feature = "http")]
 use passenger_resource_management::interface::composition_root::build_world_with_sqlite;
 
 #[cfg(feature = "http")]
