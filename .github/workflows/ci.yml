@@ -73,8 +73,6 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          # FIX: use .nvmrc — Vite 7 requires Node >=20.19 or >=22.12.
-          # node-version: "20" was too old and caused Vite config load failures.
           node-version-file: "web/.nvmrc"
           cache: "npm"
           cache-dependency-path: web/package-lock.json
