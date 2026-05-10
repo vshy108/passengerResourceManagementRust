@@ -120,7 +120,7 @@ fn sqlite_usage_sink_records_access_events() {
     use passenger_resource_management::domain::actor::Actor;
     use passenger_resource_management::domain::passenger::PassengerId;
     use passenger_resource_management::domain::resource::ResourceId;
-    use passenger_resource_management::infrastructure::fake_clock::FakeClock;
+    use passenger_resource_management::infrastructure::FakeClock;
 
     let dir = std::env::temp_dir();
     let db_path = dir.join(format!(

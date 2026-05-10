@@ -8,6 +8,11 @@ pub mod pg_store;
 pub mod sqlite_event_store;
 pub mod system_clock;
 
+// Re-export frequently-used types so callers don't need to know the sub-module
+// paths (e.g. `infrastructure::FakeClock` instead of
+// `infrastructure::fake_clock::FakeClock`).
+pub use fake_clock::FakeClock;
+
 // Re-export the entity store so composition_root.rs can import it cleanly.
 #[cfg(feature = "postgres")]
 pub use pg_store::PgAdminEventSink;
