@@ -107,3 +107,58 @@ fn entity_state_survives_restart_via_sqlite() {
     let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
     let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
 }
+
+/// Exercises the UsageSink::Sqlite arm by calling AccessService::use_resource
+/// on a SQLite-backed world. This covers composition_root.rs lines 50 and 62
+/// (UsageSink::Sqlite dispatch in append() and list()).
+#[cfg(feature = "http")]
+#[test]
+fn sqlite_usage_sink_records_access_events() {
+    use passenger_resource_management::application::passenger_service::PassengerService;
+    use passenger_resource_management::application::ports::UsageEventSource;
+    use passenger_resource_management::application::resource_service::ResourceService;
+    use passenger_resource_management::domain::actor::Actor;
+    use passenger_resource_management::domain::passenger::PassengerId;
+    use passenger_resource_management::domain::resource::ResourceId;
+    use passenger_resource_management::infrastructure::fake_clock::FakeClock;
+
+    let dir = std::env::temp_dir();
+    let db_path = dir.join(format!(
+        "prms_usage_test_{}.db",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let db_str = db_path.to_str().expect("tempdir path is UTF-8");
+
+    {
+        let mut world = build_world_with_sqlite(db_str).expect("world build failed");
+
+        // Snapshot passengers and resources into standalone services for the
+        // call — needed because use_resource requires &mut world.access and
+        // immutable borrows of passengers/resources simultaneously.
+        let pax_snapshot = world.passengers.list().to_vec();
+        let res_snapshot = world.resources.list().to_vec();
+        let pax_svc =
+            PassengerService::new(FakeClock::default()).with_preloaded(pax_snapshot, vec![]);
+        let res_svc =
+            ResourceService::new(FakeClock::default()).with_preloaded(res_snapshot, vec![]);
+
+        // ps-001 is Silver, res-lounge requires Silver → Allowed.
+        // This exercises UsageSink::Sqlite::append (composition_root.rs line 50).
+        let actor = Actor::Passenger(PassengerId("ps-001".into()));
+        let _ =
+            world
+                .access
+                .use_resource(&actor, &pax_svc, &res_svc, &ResourceId("res-lounge".into()));
+
+        // UsageSink::Sqlite::list (composition_root.rs line 62).
+        let events = world.access.sink().list();
+        assert!(!events.is_empty(), "usage event should have been recorded");
+    }
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+    let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+}

@@ -1195,13 +1195,10 @@ async fn verify_audit_chain(State(state): State<AppState>) -> Json<AuditVerifyDt
         .expect("audit_sink rwlock poisoned");
     let with_hashes = audit_sink.snapshot_with_hashes();
     let length = with_hashes.len();
-    // Re-derive the genesis hash to start the chain.
-    let genesis = {
-        let mut h = Sha256::new();
-        h.update(b"genesis");
-        hex::encode(h.finalize())
-    };
-    let mut prev = genesis;
+    // FIX: The sink uses the literal string "genesis" as the first prev_hash
+    // (not the SHA-256 of "genesis"), so we must start verification with the
+    // same sentinel rather than its digest.
+    let mut prev = "genesis".to_owned();
     let mut broken_at: Option<usize> = None;
     for (i, (ev, stored_hash)) in with_hashes.iter().enumerate() {
         // Recompute the expected hash from the event fields + previous hash.

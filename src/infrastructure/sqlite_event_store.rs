@@ -816,4 +816,131 @@ mod tests {
             assert_eq!(kind_from_str(kind_to_str(kind)).unwrap(), kind);
         }
     }
+
+    // ── error branches of from_str functions ──────────────────────────────
+
+    #[test]
+    fn tier_from_str_invalid_returns_error() {
+        assert!(tier_from_str("Mythril").is_err());
+    }
+
+    #[test]
+    fn outcome_from_str_invalid_returns_error() {
+        assert!(outcome_from_str("Maybe").is_err());
+    }
+
+    #[test]
+    fn action_from_str_invalid_returns_error() {
+        assert!(action_from_str("QuantumLeap").is_err());
+    }
+
+    #[test]
+    fn kind_from_str_invalid_returns_error() {
+        assert!(kind_from_str("Starship").is_err());
+    }
+
+    // ── usage-event hydration with pre-seeded data ────────────────────────
+
+    #[test]
+    fn sqlite_usage_hydrates_preexisting_rows() {
+        // Seed a row via SQL, then open the sink to exercise the load loop body.
+        let conn = mem_conn();
+        conn.execute(
+            "INSERT INTO usage_events
+             (id, passenger_id, resource_id, tier_at_attempt,
+              min_tier_at_attempt, timestamp, outcome)
+             VALUES ('u-pre','ps-1','res-1','Gold','Silver',99,'Allowed')",
+            [],
+        )
+        .unwrap();
+        // Opening the sink loads pre-existing rows — exercises lines 221-243.
+        let sink = SqliteUsageEventSink::open(conn).unwrap();
+        assert_eq!(sink.list().len(), 1);
+        assert_eq!(sink.list()[0].id, "u-pre");
+        assert_eq!(sink.list()[0].tier_at_attempt, Tier::Gold);
+    }
+
+    // ── SqliteEntityStore individual sync_* methods ───────────────────────
+
+    #[test]
+    fn sync_crew_leads_replaces_existing() {
+        let store = SqliteEntityStore::new(mem_conn());
+        let leads = vec![
+            crate::domain::crew_lead::CrewLead {
+                id: crate::domain::crew_lead::CrewLeadId("cl-1".into()),
+                name: "Lead One".into(),
+            },
+            crate::domain::crew_lead::CrewLead {
+                id: crate::domain::crew_lead::CrewLeadId("cl-2".into()),
+                name: "Lead Two".into(),
+            },
+        ];
+        store.sync_crew_leads(&leads);
+        let loaded = store.load_crew_leads().unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].id.0, "cl-1");
+        // Idempotent: second call replaces, not appends.
+        store.sync_crew_leads(&leads[..1]);
+        assert_eq!(store.load_crew_leads().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn sync_passengers_with_deleted_persists_both() {
+        let store = SqliteEntityStore::new(mem_conn());
+        let active = vec![crate::domain::passenger::Passenger {
+            id: PassengerId("ps-a".into()),
+            name: "Active".into(),
+            tier: Tier::Silver,
+            deleted_at: None,
+            version: 0,
+        }];
+        let deleted = vec![crate::domain::passenger::Passenger {
+            id: PassengerId("ps-d".into()),
+            name: "Deleted".into(),
+            tier: Tier::Gold,
+            deleted_at: Some(crate::domain::timestamp::Timestamp(42)),
+            version: 0,
+        }];
+        store.sync_passengers(&active, &deleted);
+        let (loaded_active, loaded_deleted) = store.load_passengers().unwrap();
+        assert_eq!(loaded_active.len(), 1);
+        assert_eq!(loaded_deleted.len(), 1);
+        assert_eq!(loaded_deleted[0].id.0, "ps-d");
+        assert_eq!(loaded_deleted[0].version, 0);
+    }
+
+    #[test]
+    fn sync_resources_with_deleted_persists_both() {
+        let store = SqliteEntityStore::new(mem_conn());
+        let active = vec![crate::domain::resource::Resource {
+            id: ResourceId("res-a".into()),
+            name: "Active".into(),
+            category: "spa".into(),
+            min_tier: Tier::Gold,
+            deleted_at: None,
+            version: 0,
+        }];
+        let deleted = vec![crate::domain::resource::Resource {
+            id: ResourceId("res-d".into()),
+            name: "Deleted".into(),
+            category: "lounge".into(),
+            min_tier: Tier::Silver,
+            deleted_at: Some(crate::domain::timestamp::Timestamp(99)),
+            version: 0,
+        }];
+        store.sync_resources(&active, &deleted);
+        let (loaded_active, loaded_deleted) = store.load_resources().unwrap();
+        assert_eq!(loaded_active.len(), 1);
+        assert_eq!(loaded_deleted.len(), 1);
+        assert_eq!(loaded_deleted[0].id.0, "res-d");
+        assert_eq!(loaded_deleted[0].version, 0);
+    }
+
+    // ── ping_db ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn ping_db_returns_true_for_valid_connection() {
+        let store = SqliteEntityStore::new(mem_conn());
+        assert!(store.ping_db());
+    }
 }

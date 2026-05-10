@@ -126,3 +126,44 @@ pub fn auth_req(method: Method, path: &str, token: &str, body: Option<Value>) ->
     };
     b.body(body).expect("request")
 }
+
+/// Build an authenticated request that also carries an `If-Match: "<version>"` header.
+pub fn auth_req_if_match(
+    method: Method,
+    path: &str,
+    token: &str,
+    version: u64,
+    body: Option<Value>,
+) -> Request<Body> {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("authorization", format!("Bearer {token}"))
+        .header("if-match", format!("\"{version}\""));
+    let body = match body {
+        Some(v) => {
+            b = b.header("content-type", "application/json");
+            Body::from(serde_json::to_vec(&v).expect("json"))
+        }
+        None => Body::empty(),
+    };
+    b.body(body).expect("request")
+}
+
+/// Send a request and also return the response headers (for ETag inspection).
+pub async fn send_full(
+    app: &Router,
+    req: Request<Body>,
+) -> (StatusCode, Value, axum::http::HeaderMap) {
+    let res = app.clone().oneshot(req).await.expect("response");
+    let status = res.status();
+    let headers = res.headers().clone();
+    let bytes = res.into_body().collect().await.expect("body").to_bytes();
+    let body = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+    };
+    (status, body, headers)
+}
