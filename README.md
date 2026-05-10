@@ -1,7 +1,7 @@
 # Spaceship X26 — Passenger Resource Management System (PRMS)
 
 A small, layered Rust crate that models tier-based access to ship resources
-(Silver / Gold / Platinum), with crew-lead-administered passengers and
+(Silver / Gold / Diamond / Platinum), with crew-lead-administered passengers and
 resources, an audit trail of administrative changes, a usage-event log of
 every access attempt, and reporting queries on top.
 
@@ -136,6 +136,9 @@ All flags also read from the matching environment variable:
 | `--enable-reset`        | `PRMS_ENABLE_RESET`        | `false`            | Register the `/reset` route (local dev only)         |
 | `--shutdown-grace-secs` | `PRMS_SHUTDOWN_GRACE_SECS` | `10`               | Max seconds to drain in-flight requests after SIGINT |
 | `--api-keys`            | `PRMS_API_KEYS`            | _unset_ (all 401)  | Comma-separated `token:actor-id` pairs, e.g. `tok1:cl-aria,tok2:ps-001` |
+| `--db-path`             | `PRMS_DB_PATH`             | _unset_ (in-memory) | Path to SQLite database file. When set, entities + events survive restarts. |
+| `--pg-url`              | `PRMS_PG_URL`              | _unset_            | PostgreSQL connection URL. Takes priority over `--db-path`. Requires `--features postgres`. |
+| `--enable-rate-limit`   | `PRMS_ENABLE_RATE_LIMIT`   | `true`             | Enable per-IP rate limiting. Set `false` in e2e / integration environments where all requests share one loopback IP. |
 | `--rate-limit-rps`      | `PRMS_RATE_LIMIT_RPS`      | `10`               | Per-IP token replenish rate (req/s). Set lower for stricter throttling. |
 | `--rate-limit-burst`    | `PRMS_RATE_LIMIT_BURST`    | `50`               | Per-IP initial token burst before throttling begins. |
 | `--log-format`          | `PRMS_LOG_FORMAT`          | `text`             | `text` (human) or `json` (newline-delimited JSON for Loki/Datadog/CloudWatch). |
@@ -287,11 +290,11 @@ In production-mode (`PRMS_DB_PATH` set), events persist to SQLite but entity sta
 
 Other known constraints:
 
-- State is held behind an `RwLock<World>` — concurrent reads (GET endpoints) proceed
-  without blocking each other; writes (POST/PUT/PATCH/DELETE) hold an exclusive lock.
-  This is fine for the demo load, but scaling concurrent writers would require replacing
-  the in-memory World with a fully database-backed architecture (e.g. PostgreSQL with
-  per-request connections and row-level locking) rather than a global process lock.
+- State is split across five per-aggregate `RwLock`s (`crew_leads`, `passengers`,
+  `resources`, `access`, `audit_sink`). Concurrent GETs across different aggregates
+  proceed with zero contention; writes to one aggregate do not block reads or writes
+  on another. Horizontal scaling (shared state across processes) still requires a
+  fully database-backed architecture such as PostgreSQL with per-request connections.
 - `POST /reset` is gated by `PRMS_ENABLE_RESET=true` — never enable in production.
 - Bearer tokens are resolved from `PRMS_API_KEYS` at startup; a real deployment would
   back this with a secrets manager and short-lived tokens.
