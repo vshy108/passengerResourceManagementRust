@@ -4,4 +4,5 @@ Cargo.lock.bak
 *.swp
 /target
 coverage.json
-*.pdf
+*.pdf# Local dev env — may contain real tokens on actual deployments.
+dev.env
