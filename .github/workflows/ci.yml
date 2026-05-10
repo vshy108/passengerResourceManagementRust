@@ -112,13 +112,23 @@ jobs:
       - name: install dependencies
         working-directory: web
         run: npm ci
+      - name: get Playwright version
+        id: pw-version
+        working-directory: web
+        # FIX: key the cache on the exact @playwright/test version rather than
+        # the full package-lock.json hash. hashFiles('package-lock.json') changes
+        # whenever ANY package changes, causing a cache miss even when Playwright
+        # itself hasn't changed. Reading the version from the installed
+        # node_modules (after npm ci) gives a stable, semantically correct key.
+        run: |
+          VER=$(node -p "require('@playwright/test/package.json').version")
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
       - name: cache Playwright browsers
         id: pw-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          # Key on the Playwright version so the cache is invalidated on upgrades.
-          key: playwright-${{ hashFiles('web/package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
       - name: install Playwright system dependencies
         working-directory: web
         # FIX: always install OS-level packages (libglib, libnss, etc.) that
