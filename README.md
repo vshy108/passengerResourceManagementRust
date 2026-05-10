@@ -103,7 +103,7 @@ cargo run --features http --bin serve
 | `GET` | `/usage` | List all `UsageEvent`s |
 | `GET` | `/reports/by-tier` | Aggregate usage counts by passenger tier |
 | `GET` | `/reports/top-resources` | Top-N resources by allowed-use count |
-| `GET` | `/reports/personal-history/{id}` | Personal usage history for a passenger |
+| `GET` | `/reports/history/{id}` | Personal usage history for a passenger |
 | `POST` | `/reset` | Reset in-memory state — only registered when `PRMS_ENABLE_RESET=true` |
 
 State resets on restart in demo mode (no `PRMS_DB_PATH`); set `PRMS_DB_PATH` for event and entity persistence. Quick smoke test (requires `PRMS_API_KEYS` — see below):
@@ -237,11 +237,12 @@ so the type system catches mix-ups at compile time. Errors are a single
 - **OpenAPI is generated, not handwritten.** `utoipa` derives the
   schema from the same DTOs the handlers use, so the spec cannot
   drift from the wire format.
-- **Coverage gate at 96% lines** (`src/bin/serve.rs` and SQLite
-  infrastructure excluded — they require real I/O). The remaining
-  uncovered lines are infra-only paths (rwlock-poison 503, SQLite failure
-  injection) that cannot be hit without unsafe thread manipulation or
-  OS-level I/O failure simulation.
+- **Coverage gate at 96% lines** (only `src/bin/serve.rs` excluded — it
+  boots real I/O and cannot be unit-tested). The remaining uncovered lines
+  are infra-only paths (rwlock-poison 503, CORS branch, governor rate-limit
+  block) that cannot be hit without unsafe thread manipulation or OS-level
+  I/O failure simulation. `sqlite_event_store` is included in the measured
+  surface and covered by `tests/sqlite_persistence.rs`.
 
 **Assumptions.**
 - A passenger keeps the same tier between the moment of access and

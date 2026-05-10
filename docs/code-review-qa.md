@@ -615,7 +615,7 @@ Keeping validation at the boundary follows AGENTS.md §5: once input passes the 
 
 **Q: The `Actor` type carries no authentication token. Is that a security gap?**
 
-A: For the current scope it is a known, intentional limitation: the system does no authentication — identity is caller-supplied. Any client that knows a crew lead ID can act as that crew lead. The spec focuses on RBAC (role-based access) not authn. Adding authentication would mean adding a new port trait (e.g., `AuthProvider`) and an identity extraction step in the interface layer before constructing `Actor`. The domain layer would not change.
+A: No longer a gap. The `AuthActor` extractor in `src/interface/http.rs` reads `Authorization: Bearer <token>`, resolves the token against `PRMS_API_KEYS` (a `HashMap<String, String>` built at startup), and returns 401 for missing or unknown tokens. The actor ID is derived from the token — the request body no longer carries `actor_id`. Tokens are compared using `subtle::ConstantTimeEq` to prevent timing-based token enumeration (OWASP A07). Adding stronger authentication (signed JWTs, session store, RBAC) would mean adding a new port trait (e.g., `AuthProvider`) and updating the extractor — the domain layer would not change.
 
 ---
 
@@ -1011,16 +1011,15 @@ The two-stage build keeps the final image small (no Rust toolchain in production
 
 **Q: There is no CI configuration file (`.github/workflows/`, `.gitlab-ci.yml`) in the workspace listing. What would you add?**
 
-A: A minimal CI pipeline would:
+A: `.github/workflows/ci.yml` is present and runs:
 1. `cargo fmt --check` — reject unformatted code.
-2. `cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic` — zero lint warnings.
-3. `cargo nextest run --features http` — all tests pass.
-4. `cargo deny check` — no advisories, no banned licenses.
-5. `cargo llvm-cov --lcov` — coverage report (gated at a minimum threshold).
-6. `npm run typecheck && npm run lint && npm test` — TypeScript and frontend checks.
-7. `docker build` — verify the container builds.
+2. `cargo clippy --all-targets -- -D warnings` and `cargo clippy --all-targets --features http -- -D warnings -W clippy::pedantic` — zero lint warnings.
+3. `cargo nextest run` (default) + `cargo llvm-cov nextest --features http --fail-under-lines 96` — all tests pass, 96%+ coverage gated.
+4. `cargo deny --all-features check advisories bans licenses sources` — supply-chain audit.
+5. `npm run lint && npm run typecheck && npm run build` — TypeScript and frontend checks.
+6. Playwright E2E job that starts the Rust server, seeds state, and runs the full browser test suite.
 
-Each step is a separate job so failures are localised. Steps 1-5 map exactly to what AGENTS.md §1 and §7 require.
+Each check is a separate job; the E2E job depends on the `rust` and `web` jobs.
 
 ---
 
@@ -1034,7 +1033,7 @@ A: **Good points:**
 
 - **Memory safety without GC** — no GC pauses, no null-pointer crashes, no data races; caught at compile time. `#![forbid(unsafe_code)]` in the domain layer makes this explicit.
 - **Performance** — comparable to C/C++; zero-cost abstractions mean the clean layering (ports, generics, trait objects) compiles down to efficient machine code.
-- **Compile-time thread-safety** — `Send`/`Sync` traits in `src/application/ports.rs` mean the compiler verifies that types are safe to share across threads. In this codebase a single `Arc<Mutex<World>>` serialises all HTTP handlers — not concurrent, but provably correct. The traits ensure that if you later move to fine-grained locking, every unsound sharing is a compile error rather than a race condition caught in production.
+- **Compile-time thread-safety** — `Send`/`Sync` traits in `src/application/ports.rs` mean the compiler verifies that types are safe to share across threads. This codebase uses per-aggregate `RwLock` shards (one per service) so concurrent reads on different aggregates proceed without blocking. The compiler ensured correctness at every step of the refactor from the original single `Mutex<World>`. The traits guarantee that if you later move to even finer-grained locking, every unsound sharing is a compile error rather than a race condition caught in production.
 - **Exhaustive pattern matching** — adding a new `DomainError` variant forces every `match` to handle it; no silent fallthrough. Maps directly to the "closed enum" spec rules (TP-R4, AU-R3).
 - **`Result<T, E>` instead of exceptions** — errors are explicit, typed, and traced to spec IDs. The compiler won't let you silently ignore one.
 - **Tiny binaries and fast startup** — no runtime VM; the whole server ships as a single binary, easy to containerise.
@@ -1109,17 +1108,29 @@ A:
 | **Audit trail** | Every admin mutation (create/delete/tier-change/crew-lead-replace) emits an `AdminEvent` via `AdminEventSink`. Append-only, in-memory. |
 | **Usage event log** | Every access attempt stored in `InMemoryUsageEventSink`. Includes snapshot fields: `tier_at_attempt`, `min_tier_at_attempt` — correct even after future tier changes. |
 | **Reporting** | `aggregate_by_tier` (allowed/denied counts per tier), `top_resources` (top N by allowed count), `personal_history` (all events for one passenger). |
-| **HTTP adapter** | 21 Axum endpoints: full CRUD for passengers/resources, crew-lead management, access, audit, usage, reports, reset. Feature-gated (`--features http`). |
+| **HTTP adapter** | ~27 Axum endpoints: full CRUD for passengers/resources, crew-lead management, access, audit, usage, reports, reset. Feature-gated (`--features http`). |
 | **OpenAPI spec** | Dynamically generated by `utoipa` at `/openapi.json`. Always in sync with handler annotations, version embedded from `Cargo.toml`. |
 | **CORS + request IDs** | `tower-http` layers: `CorsLayer` (configurable origin list or `Any`), `SetRequestIdLayer` + `PropagateRequestIdLayer` for `x-request-id` correlation. |
 | **Error mapping** | `DomainError` → HTTP status (400/403/404/409). Machine-readable `code` string in every error body. |
 | **Deterministic clock** | `FakeClock` (`AtomicI64`, `Ordering::Relaxed`) — injected as a port trait. Time-sensitive business logic is fully testable with no `std::time`. |
-| **Input validation** | `TryFrom` and `serde` at the interface boundary — unknown tiers, malformed IDs rejected before reaching services. |
+| **Input validation** | `TryFrom` and `serde` at the interface boundary — unknown tiers, malformed IDs rejected before reaching services. Pagination params and `TopNQuery.n` are capped at the boundary (OWASP A04). |
 | **Test suite** | Unit tests (alongside source), integration tests (`tests/`), HTTP integration tests (`tests/http_*.rs`). Named after spec IDs. `cargo nextest` < 60 s. |
-| **Code coverage** | `cargo llvm-cov` configured; `coverage.json` artifact in repo. |
+| **Code coverage** | `cargo llvm-cov` configured; `coverage.json` artifact in repo. 96%+ line coverage gate in CI; only `src/bin/` excluded. |
 | **Static analysis** | `clippy --all-targets --all-features -- -D warnings -W clippy::pedantic` enforced. `rustfmt` enforced. `cargo-deny` for supply chain. |
-| **React frontend** | Two-world UI: in-browser TypeScript implementation + live Rust HTTP panel. Branded ID types, same business rules, Vite proxy for dev. |
+| **React frontend** | Thin client in `web/`; fetches all content from the Rust axum backend. TypeScript types generated from `/openapi.json` via `npm run generate:types`. |
 | **AGENTS.md** | Machine-readable contributor contract; codifies architecture, testing, commit format, and naming conventions. |
+| **Authentication** | `AuthActor` extractor reads `Authorization: Bearer <token>`, resolves against `PRMS_API_KEYS` (token → actor-id), returns 401 for missing/unknown tokens. Constant-time comparison via `subtle::ConstantTimeEq` (OWASP A07). |
+| **Persistent storage** | SQLite opt-in via `PRMS_DB_PATH`. Usage and admin events are written through on every `append()`; entity state is restored from SQLite on startup. Without `PRMS_DB_PATH`, falls back to in-memory seeded demo. |
+| **Database migrations** | `migrations/001_initial.sql` — append-only `usage_events` and `admin_events` tables, WAL mode, entity state tables. `SqliteEntityStore` restores entity state on startup. |
+| **Pagination** | `?offset=N&limit=N` (default 0/100, max offset 1 000 000, max limit 1 000) on all list endpoints via `PaginationQuery`. `TopNQuery.n` capped at 1 000. |
+| **Rate limiting** | Per-IP token-bucket governor (`tower_governor`), configurable via `--rate-limit-rps` / `--rate-limit-burst`. Disabled in tests to avoid loopback-IP exhaustion. |
+| **Graceful shutdown** | SIGTERM/SIGINT handled in `serve.rs` via `tokio::signal`; configurable drain window (`--shutdown-grace-secs`, default 10 s). |
+| **Structured logging** | `tracing` + `tracing-subscriber`; `--log-format text|json` (`PRMS_LOG_FORMAT`). JSON format ships newline-delimited records suitable for Loki/Datadog/CloudWatch. `x-request-id` propagated through spans. |
+| **Metrics** | `GET /metrics` — Prometheus text format. Gauges for crew leads, passengers, resources; counters for usage events (allowed/denied split) and admin events. |
+| **Health check depth** | `GET /health/ready` — JSON with entity counts (crew leads, passengers, resources, usage events, admin events); DB liveness ping; 503 if any lock is poisoned. |
+| **Concurrency** | Per-aggregate `RwLock` shards replace the original single `Arc<Mutex<World>>`. Reads on different aggregates proceed without blocking; documented lock-acquisition order prevents deadlocks. |
+| **CI/CD pipeline** | `.github/workflows/ci.yml` — fmt, clippy (default + `--features http`), nextest (default), llvm-cov (96% gate), cargo-deny, web build, and Playwright E2E. |
+| **Container / deployment** | Multi-stage `Dockerfile` (builder: `rust:1-bookworm`, runtime: `debian:bookworm-slim`), non-root uid 10001. `docker-compose.yml` + `Caddyfile` for automatic TLS via Let's Encrypt. |
 
 ---
 
@@ -1127,28 +1138,14 @@ A:
 
 | Area | Gap | Where it would go |
 |------|-----|-------------------|
-| **Authentication** | `actor_id` is caller-supplied — any client can impersonate any crew lead or passenger. | JWT/session middleware at `src/interface/http.rs`; the layer derives `Actor` from a verified token claim. |
-| **Authorisation token verification** | No signatures, no session store, no RBAC policy. | Auth middleware in interface layer; domain `Actor` is populated from verified identity, not the request body. |
-| **Persistent storage** | All state is in-memory; resets on restart. | `SqlitePassengerRepo`, `PostgresUsageEventSink`, etc. in `src/infrastructure/`. Port traits already exist; only the implementations and composition root change. |
-| **Database migrations** | No schema, no versioned migrations, no rollback strategy. | `sqlx`/`sea-orm` migrations in `migrations/`. |
-| **Pagination** | `GET /passengers`, `GET /resources`, `GET /usage` return unbounded lists. | Cursor-based or offset pagination query params; the usage event log grows forever and is highest risk. |
-| **Rate limiting** | No per-IP or per-actor throttling. | `tower-http` `RateLimitLayer` or an API gateway policy. |
-| **TLS / HTTPS** | The server binds plain HTTP on 127.0.0.1:8080. | Terminate TLS at a reverse proxy (nginx/Caddy) or add `rustls` + `axum-server-tls`. |
-| **Graceful shutdown** | `serve.rs` binds and loops; no signal handling for `SIGTERM`. | `tokio::signal::unix::signal` to drain in-flight requests before shutting down. |
-| **Structured logging** | `println!`/`eprintln!` only. No log levels, no trace IDs in log lines, no shipping to aggregator. | `tracing` + `tracing-subscriber` with JSON formatter; propagate `x-request-id` through spans. |
-| **Metrics** | No `/metrics` endpoint, no counters, no latency histograms. | `metrics` crate + Prometheus exporter; instrument access allowed/denied counts, error rates, handler latency. |
-| **Health check depth** | `GET /health` returns `"ok"` unconditionally. | Add a DB ping and dependency check; return structured JSON with subsystem status. |
-| **Concurrency** | Single `Arc<Mutex<World>>` serialises all handlers — correct but not concurrent. | Fine-grained locking per aggregate, or CQRS with an event bus, once throughput demands it. |
+| **TLS / HTTPS** | The server binds plain HTTP; TLS is terminated externally by Caddy in the provided `docker-compose.yml`. Direct TLS is not built in. | `rustls` + `axum-server-tls`, or keep Caddy as the TLS terminator. |
 | **Multi-instance / horizontal scaling** | Shared in-memory `World` cannot be split across processes. | Persistence layer with optimistic locking + event bus (e.g., PostgreSQL `LISTEN/NOTIFY`) for cross-instance coordination. |
 | **Optimistic concurrency control** | No `version` field; last-write-wins on concurrent tier updates. | `version` column on `passengers`/`resources`; `If-Match`/ETag headers; `409 Conflict` on stale writes. |
-| **Soft-delete querying** | `list()` silently omits deleted records; no API to inspect deleted history. | Add `GET /passengers?include_deleted=true`; expose `deleted_at` in list responses. |
-| **Frontend type generation** | `web/src/services/api.ts` hand-maintains types — drift risk on every Rust rename. | `openapi-typescript` or `orval` in CI generates types from `/openapi.json`; eliminates the manual sync. |
+| **Soft-delete querying** | `list()` silently omits deleted records; no API to inspect deleted history. | `GET /passengers?include_deleted=true`; expose `deleted_at` in list responses. |
 | **Frontend error handling** | Unknown error codes fall through to a generic message. | Generate error code enum from OpenAPI; exhaustive TypeScript switch with explicit fallback. |
 | **Accessibility** | No `aria-label`s audited, no keyboard-only path verified, colour-only error signals. | axe / Playwright accessibility scans; WCAG 2.1 AA compliance pass. |
 | **Tamper-evident audit log** | In-memory `Vec<AdminEvent>` is append-only by convention only. | Hash-chain events on insert; persist to append-only table; anchor periodic checkpoints externally. |
-| **Secret management** | No secrets in-code today, but no vault/env-secret infrastructure defined. | 12-factor env vars with a secrets manager (AWS Secrets Manager, Vault) — never committed to the repo. |
-| **CI/CD pipeline** | No `.github/workflows/` or equivalent. `AGENTS.md` documents the commands but does not automate them. | GitHub Actions: `cargo fmt --check`, `clippy -D warnings`, `cargo nextest`, `llvm-cov`, `cargo-deny`, Docker build. |
-| **Container / deployment artifact** | No `Dockerfile`, no image build, no deployment manifest. | Multi-stage `Dockerfile` (builder + distroless final); Kubernetes manifest or `docker-compose` for local parity. |
+| **Secret management** | No vault/env-secret infrastructure defined. | 12-factor env vars with a secrets manager (AWS Secrets Manager, Vault) — never committed to the repo. |
 | **API versioning** | No versioning strategy; every field rename is a breaking change. | Path versioning (`/v1/...`) or media-type versioning; OpenAPI compatibility checks in CI. |
 | **Load / chaos testing** | No performance baseline, no fault-injection tests. | `k6` or `wrk` load test for throughput baseline; chaos tests for mutex-poisoning recovery path. |
 
@@ -1160,57 +1157,29 @@ A:
 
 A:
 
-**1. Authentication.** Add an Axum middleware (using `axum::middleware::from_fn`) that runs before every authenticated route. It reads the `Authorization: Bearer <token>` header, validates the JWT signature against a public key (using the `jsonwebtoken` crate), and extracts the `sub` claim as the actor's identity. A custom Axum extractor (e.g., `struct AuthenticatedActor(Actor)`) then derives the `Actor` from the verified claim and injects it into handler parameters — the request body no longer carries `actor_id` at all. The domain layer is untouched.
+**1. TLS / HTTPS.** In production, terminate TLS at a reverse proxy (nginx or Caddy) — both handle certificate renewal via Let's Encrypt automatically. The provided `docker-compose.yml` + `Caddyfile` already do this. For embedded TLS, replace `tokio::net::TcpListener` in `serve.rs` with `axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key)` from the `axum-server` crate. Never store certificates in the repo; mount them via Kubernetes secrets or a secrets manager at deploy time. Enforce HSTS once TLS is active.
 
-**2. Authorisation token verification.** Pair authentication with a session or RBAC store. On login, issue a signed JWT containing the user's role (`crew_lead` or `passenger`) and ID. The middleware verifies the signature *and* checks the role claim before constructing `Actor::CrewLead(...)` or `Actor::Passenger(...)`. For short-lived tokens, add a `TokenBlacklist` port trait (Redis-backed in production) so tokens can be revoked without waiting for expiry. All of this lives in `src/infrastructure/auth/` and is wired in the composition root.
+**2. Multi-instance / horizontal scaling.** Move all mutable state to Postgres. Each HTTP server instance is stateless — it reads and writes through the database. Use PostgreSQL advisory locks or optimistic concurrency control (see below) to coordinate concurrent writes. For event fanout across instances (e.g., pushing real-time usage events to connected WebSocket clients), use PostgreSQL `LISTEN/NOTIFY` or a message broker (Redis Streams, Kafka). The Kubernetes `Deployment` then scales `replicas` freely.
 
-**3. Persistent storage.** Add `sqlx` (async, compile-time query checking) and create concrete infrastructure structs: `PostgresPassengerRepo`, `PostgresResourceRepo`, `PostgresUsageEventSink`. Each implements the existing port traits defined in `src/application/ports.rs` — zero changes to services. `build_demo_world()` is updated to construct a `PgPool` from an env var and inject the database-backed repos instead of in-memory ones. Start with an append-only `usage_events` table; entity tables come next.
+**3. Optimistic concurrency control.** Add a `version: i64` column to `passengers` and `resources`, defaulting to `0`, incremented on every update. Request DTOs for mutations include `expected_version: i64`. The `UPDATE` statement uses `WHERE id = $1 AND version = $2`; if it affects 0 rows, the row was modified by a concurrent request — return `409 Conflict`. Surface this on the HTTP layer with `If-Match: "<version>"` header; the client re-fetches and retries. The `Passenger` domain struct gains a `version` field; the port trait `PassengerRepo::update` accepts the expected version.
 
-**4. Database migrations.** Place numbered SQL files in `migrations/` (e.g., `0001_create_passengers.sql`) and run `sqlx migrate run` at startup inside `serve.rs` before the router is bound. `sqlx` maintains a `_sqlx_migrations` table to track applied migrations and never re-runs them. For rollbacks, add corresponding `down.sql` files. CI runs migrations against a test database container, ensuring every PR has a tested migration path before merge.
+**4. Soft-delete querying.** Add `include_deleted: Option<bool>` to the `GET /passengers` and `GET /resources` query structs. The port trait `list(include_deleted: bool)` passes the flag to the repository, which either filters `WHERE deleted_at IS NULL` or returns all rows. The response DTO already includes `deleted_at: Option<i64>` — it becomes non-null for deleted records. Add a dedicated `GET /passengers/{id}/history` endpoint that always returns the record regardless of deletion status, for audit reconciliation purposes.
 
-**5. Pagination.** Add `limit: Option<u64>` and `cursor: Option<String>` query parameters to list endpoints via a shared `PaginationQuery` struct. The service layer `list(limit, after_id)` fetches at most `limit + 1` rows — if the extra row exists, there is a next page and its ID is returned as the next cursor. The response body gains a `next_cursor: Option<String>` field. Cursor-based pagination is stable under concurrent inserts (unlike offset-based, which skips rows when new items are added above the offset).
+**5. Frontend error handling.** Generate the error code string enum from the OpenAPI spec (the `ErrorBody.code` field can be defined as an `enum` in the `utoipa` schema annotation). The TypeScript generated type becomes `code: "PassengerNotFound" | "AccessDenied" | ...`. Replace any `KNOWN_CODES` set and string-switch with a type-safe exhaustive switch over the generated union. Add an `isKnownError(code: string): code is KnownErrorCode` type guard for runtime validation of responses from older API versions.
 
-**6. Rate limiting.** Add `tower_governor` (a `tower` middleware wrapping the `governor` crate) to the router with a per-IP `RateLimiter`. Configure burst and steady-state rates (e.g., 60 req/min per IP). For per-actor rate limiting on sensitive endpoints like `POST /access`, use the authenticated actor ID as the key after the auth middleware runs. Return `429 Too Many Requests` with a `Retry-After` header so well-behaved clients back off correctly.
+**6. Accessibility.** Audit every interactive element with `axe-core` (via `@axe-core/react` in development mode, which logs violations to the browser console). Fix in priority order: all `<input>` elements need `<label htmlFor>` or `aria-label`; all icon-only buttons need `aria-label`; the allowed/denied outcome must not rely on colour alone (add a text label or icon with accessible name). Run `npx playwright test --grep accessibility` using Playwright's built-in `checkA11y` from `axe-playwright` as a CI gate. Target WCAG 2.1 AA.
 
-**7. TLS / HTTPS.** In production, terminate TLS at a reverse proxy (nginx or Caddy) — both handle certificate renewal via Let's Encrypt automatically. For embedded TLS, replace `tokio::net::TcpListener` in `serve.rs` with `axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key)` from the `axum-server` crate. Never store certificates in the repo; mount them via Kubernetes secrets or a secrets manager at deploy time. Enforce HSTS once TLS is active.
+**7. Tamper-evident audit log.** On every `AdminEvent` insert, compute `event_hash = SHA-256(previous_hash || canonical_json(event))` and store it alongside the event. The first event uses a known genesis hash (e.g., `SHA-256("genesis")`). A verification endpoint `GET /audit/verify` replays the hash chain and returns `{ valid: true, length: n }` or the first broken index. For stronger guarantees, periodically write the head hash to an external immutable store (S3 object with object lock, or a public blockchain anchor). This makes any deletion or insertion detectable.
 
-**8. Graceful shutdown.** In `serve.rs`, use `axum::serve(...).with_graceful_shutdown(shutdown_signal())` where `shutdown_signal()` is an async function that awaits `tokio::signal::unix::signal(SignalKind::terminate())?.recv()` (SIGTERM) or `ctrl_c()` (SIGINT). This tells Axum to stop accepting new connections and wait for in-flight handlers to complete before the process exits. For Kubernetes, set `terminationGracePeriodSeconds` to at least the p99 handler latency + a small buffer.
+**8. Secret management.** Never pass secrets via environment variables in plain text in production. Use a secrets manager: in AWS, store credentials in Secrets Manager or Parameter Store and fetch them at startup using the `aws-config` + `aws-sdk-secretsmanager` crates. In Kubernetes, mount secrets as environment variables from `Secret` objects (never `ConfigMap`). Rotate secrets without redeployment by adding a background task that refreshes the database password from the vault on a schedule. The `deny.toml` already blocks yanked crates; extend it with a `cargo audit` step in CI to catch known CVEs.
 
-**9. Structured logging.** Replace `println!` with `tracing::info!` / `tracing::error!` macros. In `serve.rs`, initialise a `tracing_subscriber::fmt` subscriber with `json()` format so every log line is machine-parseable. Add a `TraceLayer` from `tower-http` to automatically emit spans for every request containing the method, path, status code, and latency. Propagate the `x-request-id` header into the span so every log line for a request shares the same trace ID. Ship logs to an aggregator (Datadog, Loki, CloudWatch) via a sidecar or environment-specific subscriber.
+**9. API versioning.** Prefix all routes with `/v1/` from the start. In the `router_with` function, nest the existing routes under `.nest("/v1", v1_router())`. When a breaking change is needed, create `router_v2()` with the new shape and mount it at `/v2/`. The OpenAPI spec at `/openapi.json` serves the latest version by default; add `/v1/openapi.json` and `/v2/openapi.json` as separate endpoints. Add an OpenAPI compatibility check in CI (`oasdiff breaking old.json new.json`) that fails the build if a new commit introduces breaking changes to a currently-served version.
 
-**10. Metrics.** Add the `metrics` crate with a `metrics-exporter-prometheus` backend, initialised once in `serve.rs`. In each handler (or via a `tower` middleware), increment counters (`metrics::counter!("http_requests_total", "method" => method, "status" => status)`) and record histograms (`metrics::histogram!("http_request_duration_seconds", latency)`). For domain-specific metrics, increment `access_allowed_total` and `access_denied_total` inside `AccessService::use_resource`. Expose them at `GET /metrics` — but keep that endpoint off the public router (internal port or authenticated).
-
-**11. Health check depth.** Replace the static `"ok"` response with a `HealthResponse { status: "ok" | "degraded", checks: HashMap<String, CheckResult> }` JSON body. Each `CheckResult` records whether a dependency (database connection, audit sink, downstream service) is reachable and its latency. The overall `status` is `"degraded"` if any check fails. Kubernetes liveness probes check the HTTP status code (200 vs 503); readiness probes use the same endpoint to gate traffic until all dependencies are healthy.
-
-**12. Concurrency (fine-grained locking).** Replace the single `Arc<Mutex<World>>` with per-aggregate `Arc<Mutex<...>>` — one for `PassengerService`, one for `ResourceService`, one for `CrewLeadService`, one for `AccessService`. Handlers acquire only the lock(s) they need. Lock ordering must be documented and strictly followed (e.g., always acquire in alphabetical service order) to prevent deadlocks. Alternatively, move to an actor-model (using `tokio::sync::mpsc` channels): each service runs as a dedicated task that processes requests sequentially from a channel, eliminating locks entirely.
-
-**13. Multi-instance / horizontal scaling.** Move all mutable state to Postgres. Each HTTP server instance is stateless — it reads and writes through the database. Use PostgreSQL advisory locks or optimistic concurrency control (see below) to coordinate concurrent writes. For event fanout across instances (e.g., pushing real-time usage events to connected WebSocket clients), use PostgreSQL `LISTEN/NOTIFY` or a message broker (Redis Streams, Kafka). The Kubernetes `Deployment` then scales `replicas` freely.
-
-**14. Optimistic concurrency control.** Add a `version: i64` column to `passengers` and `resources`, defaulting to `0`, incremented on every update. Request DTOs for mutations include `expected_version: i64`. The `UPDATE` statement uses `WHERE id = $1 AND version = $2`; if it affects 0 rows, the row was modified by a concurrent request — return `409 Conflict`. Surface this on the HTTP layer with `If-Match: "<version>"` header; the client re-fetches and retries. The `Passenger` domain struct gains a `version` field; the port trait `PassengerRepo::update` accepts the expected version.
-
-**15. Soft-delete querying.** Add `include_deleted: Option<bool>` to the `GET /passengers` and `GET /resources` query structs. The port trait `list(include_deleted: bool)` passes the flag to the repository, which either filters `WHERE deleted_at IS NULL` or returns all rows. The response DTO already includes `deleted_at: Option<i64>` — it becomes non-null for deleted records. Add a dedicated `GET /passengers/{id}/history` endpoint that always returns the record regardless of deletion status, for audit reconciliation purposes.
-
-**16. Frontend type generation.** Add `openapi-typescript` (or `orval`) as a dev dependency in `web/package.json`. In `package.json` scripts, add `"codegen": "openapi-typescript http://127.0.0.1:8080/openapi.json -o src/generated/api.ts"`. In CI, start the Rust server in the background, run codegen, then assert no git diff — a type drift on any Rust field rename or enum addition breaks CI before any human notices. Delete the hand-maintained types in `api.ts` and re-export from the generated file.
-
-**17. Frontend error handling.** Generate the error code string enum from the OpenAPI spec (the `ErrorBody.code` field can be defined as an `enum` in the `utoipa` schema annotation). The TypeScript generated type becomes `code: "PassengerNotFound" | "AccessDenied" | ...`. Replace the `KNOWN_CODES` set and `toDomainError()` string-switch with a type-safe exhaustive switch over the generated union. Add an `isKnownError(code: string): code is KnownErrorCode` type guard for runtime validation of responses from older API versions.
-
-**18. Accessibility.** Audit every interactive element with `axe-core` (via `@axe-core/react` in development mode, which logs violations to the browser console). Fix in priority order: all `<input>` elements need `<label htmlFor>` or `aria-label`; all icon-only buttons need `aria-label`; the allowed/denied outcome must not rely on colour alone (add a text label or icon with accessible name). Run `npx playwright test --grep accessibility` using Playwright's built-in `checkA11y` from `axe-playwright` as a CI gate. Target WCAG 2.1 AA.
-
-**19. Tamper-evident audit log.** On every `AdminEvent` insert, compute `event_hash = SHA-256(previous_hash || canonical_json(event))` and store it alongside the event. The first event uses a known genesis hash (e.g., `SHA-256("genesis")`). A verification endpoint `GET /audit/verify` replays the hash chain and returns `{ valid: true, length: n }` or the first broken index. For stronger guarantees, periodically write the head hash to an external immutable store (S3 object with object lock, or a public blockchain anchor). This makes any deletion or insertion detectable.
-
-**20. Secret management.** Never pass secrets via environment variables in plain text in production. Use a secrets manager: in AWS, store credentials in Secrets Manager or Parameter Store and fetch them at startup using the `aws-config` + `aws-sdk-secretsmanager` crates. In Kubernetes, mount secrets as environment variables from `Secret` objects (never `ConfigMap`). Rotate secrets without redeployment by adding a background task that refreshes the database password from the vault on a schedule. The `deny.toml` already blocks yanked crates; extend it with a `cargo audit` step in CI to catch known CVEs.
-
-**21. CI/CD pipeline.** Create `.github/workflows/ci.yml` with jobs: `fmt` (`cargo fmt --check`), `clippy` (`cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic`), `test` (`cargo nextest run --all-features`), `coverage` (`cargo llvm-cov --lcov --output-path lcov.info` + Codecov upload), `deny` (`cargo deny check`), `audit` (`cargo audit`), and `docker-build`. Run all jobs in parallel except `docker-build` which depends on `test`. Add a `cd.yml` that triggers on tags matching `v*`, builds a multi-arch image, pushes to a container registry, and applies a Kubernetes manifest.
-
-**22. Container / deployment artifact.** Write a two-stage `Dockerfile`: stage 1 uses `rust:1.78-slim` with `cargo-chef` to cache dependency compilation, then compiles the release binary with `cargo build --release --features http`; stage 2 uses `gcr.io/distroless/cc-debian12` (no shell, no package manager) and copies only the binary. The resulting image is typically under 20 MB. Add a `docker-compose.yml` for local parity: `prms` service (the Rust binary), `postgres` service, and `web` service (Vite dev server), all on a shared network with env-var-based configuration.
-
-**23. API versioning.** Prefix all routes with `/v1/` from the start. In the `router_with` function, nest the existing routes under `.nest("/v1", v1_router())`. When a breaking change is needed, create `router_v2()` with the new shape and mount it at `/v2/`. The OpenAPI spec at `/openapi.json` serves the latest version by default; add `/v1/openapi.json` and `/v2/openapi.json` as separate endpoints. Add an OpenAPI compatibility check in CI (`oasdiff breaking old.json new.json`) that fails the build if a new commit introduces breaking changes to a currently-served version.
-
-**24. Load / chaos testing.** Write a `k6` script (`tests/load/access_flood.js`) that creates 10 passengers and 5 resources, then hammers `POST /access` at 500 RPS for 60 seconds, asserting p99 latency < 200 ms and error rate < 0.1%. Run it in CI on merge to `main` against a staging environment. For chaos testing, use `toxiproxy` to inject latency and connection drops on the database connection and assert the server returns `503` gracefully rather than hanging. Test mutex-poisoning recovery by intentionally panicking a handler in a canary test and asserting the next request receives a 500 (not a hang).
+**10. Load / chaos testing.** Write a `k6` script (`tests/load/access_flood.js`) that creates 10 passengers and 5 resources, then hammers `POST /access` at 500 RPS for 60 seconds, asserting p99 latency < 200 ms and error rate < 0.1%. Run it in CI on merge to `main` against a staging environment. For chaos testing, use `toxiproxy` to inject latency and connection drops on the database connection and assert the server returns `503` gracefully rather than hanging. Test mutex-poisoning recovery by intentionally panicking a handler in a canary test and asserting the next request receives a 500 (not a hang).
 
 ---
 
-**Summary:** The repository is solid for levels 1–4 of the assignment scope — the domain model, business rules, audit trail, reporting, HTTP adapter, and React demo are all present and tested. The gaps above are the standard delta between a well-engineered demo and a production service. None of them require redesigning the domain or service layers; they are infrastructure, operations, and security concerns that the port-trait architecture was explicitly designed to absorb without touching business logic.
+**Summary:** The repository covers the full assignment scope — domain model, business rules, audit trail, reporting, HTTP adapter with auth/rate-limiting/pagination/metrics, SQLite persistence, React thin client with generated types, Playwright E2E, and CI/CD with coverage gating. The remaining gaps (TLS termination, horizontal scaling, optimistic concurrency, soft-delete querying, frontend error enum, accessibility, tamper-evident audit, secret management, API versioning, load/chaos testing) are infrastructure and operations concerns that the port-trait architecture was explicitly designed to absorb without touching business logic.
 
 ---
 
@@ -1275,7 +1244,7 @@ The snapshot fields in `usage_events` are intentionally duplicated rather than n
 
 **Q: Would you use SQL transactions for access attempts?**
 
-A: Yes, if access attempts were persisted. The read of passenger/resource state, the permission decision, and the insert into `usage_events` should be one transaction at an appropriate isolation level. Otherwise a tier or min-tier could change between the read and the event insert, producing a snapshot that does not match the decision. In the current in-memory implementation, the single `Mutex<World>` effectively gives the transaction boundary: no other request can interleave while an access attempt is processed.
+A: Yes, if access attempts were persisted. The read of passenger/resource state, the permission decision, and the insert into `usage_events` should be one transaction at an appropriate isolation level. Otherwise a tier or min-tier could change between the read and the event insert, producing a snapshot that does not match the decision. In the current implementation, the `access` write lock is held for the entire `use_resource` call; the `passengers` and `resources` read locks are released after their data is read. This prevents interleaving within a single access attempt. With a database backend, the equivalent is a `SERIALIZABLE` or `REPEATABLE READ` transaction spanning the read and insert.
 
 ---
 
@@ -1445,7 +1414,7 @@ A: The plan uses sketch types like `Id` and `DateTime<Utc>`, while the implement
 
 **Q: What are the three strongest design trade-offs to explain from the prompt?**
 
-A: First, **in-memory state vs persistence**: in-memory keeps the assignment small and testable, but data resets on restart. Second, **single `Mutex<World>` vs fine-grained locking**: one lock is simple and correct for a demo, but limits concurrency under load. Third, **manual TypeScript mirror vs generated client**: manual mirror is quick and dependency-light, but risks frontend/backend drift. These are good trade-offs because each choice matches the current scope and has a clear upgrade path.
+A: First, **opt-in SQLite vs always-on persistence**: in-memory is the default so the core test path needs no infrastructure; SQLite is opt-in via `PRMS_DB_PATH`. Data resets on restart without it — a documented, acceptable trade-off for the demo scope. Second, **per-aggregate `RwLock` shards vs actor-model channels**: per-aggregate locking is simple and correct; an actor-model (each service as a tokio task + channel) would eliminate locks entirely but adds complexity. Third, **generated TypeScript types vs handwritten mirror**: `openapi-typescript` now generates types from the live `/openapi.json`, eliminating drift risk. These trade-offs match the current scope and each has a clear upgrade path.
 
 ---
 
