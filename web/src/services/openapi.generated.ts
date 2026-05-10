@@ -36,6 +36,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/audit/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["verify_audit_chain"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/crew-leads": {
         parameters: {
             query?: never;
@@ -319,11 +335,26 @@ export interface components {
             action: string;
             actor_id: string;
             details?: string | null;
+            /**
+             * @description SHA-256 hex digest of this event linked to the previous event's hash.
+             *     Empty string when the event was loaded from a persistence store that
+             *     does not maintain the in-memory hash chain (e.g. `SQLite` adapter).
+             */
+            event_hash: string;
             id: string;
             target_id: string;
             target_kind: string;
             /** Format: int64 */
             timestamp: number;
+        };
+        /** @description Response body for `GET /audit/verify`. */
+        AuditVerifyDto: {
+            /** @description Index of the first broken link, if any. */
+            broken_at?: number | null;
+            /** @description Total number of events in the chain. */
+            length: number;
+            /** @description `true` when the entire hash chain is intact. */
+            valid: boolean;
         };
         ChangeTierReq: {
             tier: components["schemas"]["TierDto"];
@@ -344,9 +375,15 @@ export interface components {
             name: string;
         };
         ErrorBody: {
-            code: string;
+            code: components["schemas"]["ErrorCode"];
             error: string;
         };
+        /**
+         * @description Machine-readable error code returned in every error response body.
+         *     Exhaustive TypeScript union generated from this enum via `/openapi.json`.
+         * @enum {string}
+         */
+        ErrorCode: "UnauthorizedActor" | "AccessDenied" | "PassengerNotFound" | "PassengerAlreadyExists" | "ResourceNotFound" | "ResourceAlreadyExists" | "CrewLeadNotFound" | "CrewLeadAlreadyExists" | "CrewLeadLimitReached" | "CrewLeadMinimumBreached" | "CrewLeadBootstrapInvalid" | "InvalidInput" | "Unauthorized" | "VersionConflict" | "InternalError" | "DatabaseUnreachable";
         /** @description Response body for `GET /health/ready`. */
         HealthReadyDto: {
             admin_events: number;
@@ -356,6 +393,8 @@ export interface components {
             /** @description Always `"ready"` on a 200 response. */
             status: string;
             usage_events: number;
+            /** @description Semver of the running binary, e.g. `"1.0.0"`. */
+            version: string;
         };
         /** @enum {string} */
         OutcomeDto: "Allowed" | "Denied";
@@ -365,6 +404,12 @@ export interface components {
             id: string;
             name: string;
             tier: components["schemas"]["TierDto"];
+            /**
+             * Format: int64
+             * @description Optimistic concurrency version. Use as the `If-Match: "<version>"` header
+             *     value on PATCH/DELETE requests to prevent lost-update races.
+             */
+            version: number;
         };
         ReplaceCrewLeadReq: {
             new_lead: components["schemas"]["CrewLeadDto"];
@@ -376,6 +421,12 @@ export interface components {
             id: string;
             min_tier: components["schemas"]["TierDto"];
             name: string;
+            /**
+             * Format: int64
+             * @description Optimistic concurrency version. Use as the `If-Match: "<version>"` header
+             *     value on PATCH/DELETE requests to prevent lost-update races.
+             */
+            version: number;
         };
         TierCountsDto: {
             /** Format: int64 */
@@ -462,6 +513,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminEventDto"][];
+                };
+            };
+        };
+    };
+    verify_audit_chain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditVerifyDto"];
                 };
             };
         };
@@ -648,6 +718,7 @@ export interface operations {
             query?: {
                 offset?: number | null;
                 limit?: number | null;
+                include_deleted?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -758,6 +829,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
+            /** @description If-Match version mismatch */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
         };
     };
     change_passenger_tier: {
@@ -782,6 +862,15 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description If-Match version mismatch */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -890,6 +979,7 @@ export interface operations {
             query?: {
                 offset?: number | null;
                 limit?: number | null;
+                include_deleted?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -1021,6 +1111,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
+            /** @description If-Match version mismatch */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
         };
     };
     change_resource_min_tier: {
@@ -1045,6 +1144,15 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description If-Match version mismatch */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
