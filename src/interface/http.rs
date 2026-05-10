@@ -22,9 +22,9 @@ use subtle::ConstantTimeEq;
 
 // `axum` is the HTTP framework. The `use { a, b, c }` syntax imports
 // multiple items from one path in a single statement.
-use axum::
-    {
-    Json, Router,
+use axum::{
+    Json,
+    Router,
     body::Bytes,
     // Axum *extractors* — types that pull data out of a request:
     //   Path<T>   -> URL path parameters
@@ -38,36 +38,34 @@ use axum::
     routing::{get, patch, post, put},
 };
 // `tower-http` is a collection of reusable HTTP middlewares.
+use tower_governor::GovernorLayer;
+use tower_governor::governor::GovernorConfigBuilder;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
-use tower_governor::GovernorLayer;
-use tower_governor::governor::GovernorConfigBuilder;
 use utoipa::OpenApi;
 
+use crate::application::access_service::AccessService;
+use crate::application::crew_lead_service::CrewLeadService;
+use crate::application::passenger_service::PassengerService;
+use crate::application::resource_service::ResourceService;
 use crate::domain::actor::Actor;
 use crate::domain::crew_lead::CrewLeadId;
 use crate::domain::errors::DomainError;
 use crate::domain::passenger::PassengerId;
 use crate::domain::resource::ResourceId;
 use crate::domain::tier::Tier;
-use crate::interface::composition_root::{World, build_demo_world};
+use crate::infrastructure::SqliteEntityStore;
+use crate::infrastructure::fake_clock::FakeClock;
+use crate::interface::composition_root::{AuditSink, UsageSink, World, build_demo_world};
 use crate::interface::dto::{
-    AccessibleQuery, AddCrewLeadReq, AdminEventDto, ChangeTierReq,
-    CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, HealthReadyDto, OutcomeDto,
-    PaginationQuery, PassengerDto, ReplaceCrewLeadReq, ResourceDto,
-    TierCountsDto, TierDto, TopNQuery, TopResourceDto, UsageEventDto, UseResourceReq,
+    AccessibleQuery, AddCrewLeadReq, AdminEventDto, ChangeTierReq, CreatePassengerReq,
+    CreateResourceReq, CrewLeadDto, ErrorBody, HealthReadyDto, OutcomeDto, PaginationQuery,
+    PassengerDto, ReplaceCrewLeadReq, ResourceDto, TierCountsDto, TierDto, TopNQuery,
+    TopResourceDto, UsageEventDto, UseResourceReq,
 };
 
-/// Shared state held by every handler — bundles the mutable World
-/// (behind an `RwLock`) with the immutable API key→actor-ID lookup table.
-///
-/// `Clone` is cheap: both fields are `Arc`-wrapped.
-///
-/// An `RwLock` is used instead of a `Mutex` so concurrent read-only requests
-/// (list, get, reports, audit) can proceed in parallel. Only mutating handlers
-/// need an exclusive write lock, which they hold for the minimum duration.
 /// Cached idempotency response: raw body bytes, status code, and Unix-second expiry.
 struct IdempotencyEntry {
     status: StatusCode,
@@ -80,9 +78,40 @@ struct IdempotencyEntry {
 /// Entries expire after `IDEMPOTENCY_TTL_SECS` seconds.
 const IDEMPOTENCY_TTL_SECS: u64 = 600; // 10 minutes
 
+/// Per-aggregate lock shards.
+///
+/// Each aggregate gets its own `RwLock` so concurrent writes to DIFFERENT
+/// aggregates proceed without serialization. Only writes to the SAME aggregate
+/// type contend with each other.
+///
+/// **Lock acquisition order** (prevents deadlocks when multiple locks are needed
+/// simultaneously, e.g. `use_resource` and `reset_world`):
+///
+///   `crew_leads` → `passengers` → `resources` → `access` → `audit_sink`
+///
+/// Never acquire a lock out of this order.
+struct WorldShards {
+    crew_leads: RwLock<CrewLeadService>,
+    passengers: RwLock<PassengerService<FakeClock>>,
+    resources: RwLock<ResourceService<FakeClock>>,
+    access: RwLock<AccessService<FakeClock, UsageSink>>,
+    audit_sink: RwLock<AuditSink>,
+    /// Present when `PRMS_DB_PATH` is set. Not behind a lock because it is
+    /// immutable after construction (only `sync_all` is called on it, never
+    /// replaced). `SqliteEntityStore` is internally Mutex-protected.
+    entity_store: Option<SqliteEntityStore>,
+}
+
+/// Shared state held by every handler. `Clone` is cheap: all fields are
+/// `Arc`-wrapped.
+///
+/// Uses per-aggregate `RwLock`s (via `WorldShards`) so concurrent reads on ANY
+/// aggregate proceed without blocking, and concurrent writes to DIFFERENT
+/// aggregates proceed without serialization. Only writes to the SAME aggregate
+/// type must wait for the current writer.
 #[derive(Clone)]
 pub struct AppState {
-    world: Arc<RwLock<World>>,
+    world: Arc<WorldShards>,
     /// Maps bearer token → actor ID string. Immutable after construction.
     api_keys: Arc<HashMap<String, String>>,
     /// Idempotency cache: `Idempotency-Key` header → cached response.
@@ -90,9 +119,28 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Decompose `world` into per-aggregate `RwLock`s.
+    ///
+    /// The public signature is unchanged from the single-lock version so
+    /// `http_common::app()` and `serve.rs` require no modification.
     pub fn new(world: World, api_keys: HashMap<String, String>) -> Self {
+        let World {
+            crew_leads,
+            passengers,
+            resources,
+            access,
+            audit_sink,
+            entity_store,
+        } = world;
         Self {
-            world: Arc::new(RwLock::new(world)),
+            world: Arc::new(WorldShards {
+                crew_leads: RwLock::new(crew_leads),
+                passengers: RwLock::new(passengers),
+                resources: RwLock::new(resources),
+                access: RwLock::new(access),
+                audit_sink: RwLock::new(audit_sink),
+                entity_store,
+            }),
             api_keys: Arc::new(api_keys),
             idempotency: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -110,7 +158,10 @@ fn now_secs() -> u64 {
 /// Look up an idempotency key. Returns the cached response if present and unexpired.
 /// Evicts stale entries opportunistically on every lookup.
 fn idempotency_get(state: &AppState, key: &str) -> Option<Response> {
-    let mut cache = state.idempotency.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut cache = state
+        .idempotency
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let now = now_secs();
     // Opportunistic eviction of expired entries to bound memory growth.
     cache.retain(|_, v| v.expires_at > now);
@@ -118,15 +169,30 @@ fn idempotency_get(state: &AppState, key: &str) -> Option<Response> {
         // FIX: (StatusCode, Bytes).into_response() does not set Content-Type.
         // Explicitly set application/json so retried requests are indistinguishable
         // from the original 201 response.
-        (e.status, [(axum::http::header::CONTENT_TYPE, "application/json")], e.body.clone()).into_response()
+        (
+            e.status,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            e.body.clone(),
+        )
+            .into_response()
     })
 }
 
 /// Store a response body under an idempotency key for `IDEMPOTENCY_TTL_SECS`.
 /// Only called after a successful (2xx) domain operation.
 fn idempotency_put(state: &AppState, key: String, status: StatusCode, body: Bytes) {
-    let mut cache = state.idempotency.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    cache.insert(key, IdempotencyEntry { status, body, expires_at: now_secs() + IDEMPOTENCY_TTL_SECS });
+    let mut cache = state
+        .idempotency
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache.insert(
+        key,
+        IdempotencyEntry {
+            status,
+            body,
+            expires_at: now_secs() + IDEMPOTENCY_TTL_SECS,
+        },
+    );
 }
 
 /// CORS origin policy. `Any` accepts any origin (dev/demo default);
@@ -249,15 +315,13 @@ pub fn router_with(
         // Disabled in tests: in-process requests all share the same loopback IP,
         // which would exhaust the token bucket and cause spurious test failures.
         .layer(tower::util::option_layer(if enable_rate_limit {
-            Some(GovernorLayer::new(
-                std::sync::Arc::new(
-                    GovernorConfigBuilder::default()
-                        .per_second(rate_limit_rps)
-                        .burst_size(rate_limit_burst)
-                        .finish()
-                        .expect("valid governor config (rps must be non-zero)"),
-                ),
-            ))
+            Some(GovernorLayer::new(std::sync::Arc::new(
+                GovernorConfigBuilder::default()
+                    .per_second(rate_limit_rps)
+                    .burst_size(rate_limit_burst)
+                    .finish()
+                    .expect("valid governor config (rps must be non-zero)"),
+            )))
         } else {
             None
         }))
@@ -352,24 +416,45 @@ fn bad_request(msg: &str) -> Response {
         .into_response()
 }
 
-/// Acquire a **shared** read lock on the World. Used by all read-only
-/// handlers so concurrent reads proceed without blocking each other.
+/// Flush all entity state to `SQLite`. No-op when no entity store is configured.
+///
+/// Collects data under brief per-aggregate read locks, releases all locks,
+/// then calls `sync_all` outside any lock — so I/O never blocks other handlers.
 ///
 /// # Panics
-/// If the `RwLock` is poisoned (a previous writer panicked mid-mutation).
-fn read_world(state: &AppState) -> std::sync::RwLockReadGuard<'_, World> {
-    // SAFETY (re: AGENTS.md §3): poisoned lock = World in unknown state;
-    // propagating the panic is correct — no silent corruption.
-    state.world.read().expect("world rwlock poisoned")
-}
-
-/// Acquire an **exclusive** write lock on the World. Used only by
-/// handlers that mutate state (create, update, delete, `use_resource`, reset).
-///
-/// # Panics
-/// If the `RwLock` is poisoned.
-fn write_world(state: &AppState) -> std::sync::RwLockWriteGuard<'_, World> {
-    state.world.write().expect("world rwlock poisoned")
+/// Panics if any `RwLock` is poisoned or any `SQLite` write fails (a divergence
+/// between in-memory and persistent state is unrecoverable, so crashing is correct).
+fn flush_to_db(state: &AppState) {
+    let Some(store) = &state.world.entity_store else {
+        return;
+    };
+    // Collect under brief, sequentially-released read locks.
+    let leads = state
+        .world
+        .crew_leads
+        .read()
+        .expect("crew_leads rwlock poisoned")
+        .list()
+        .to_vec();
+    let (active_pax, deleted_pax) = {
+        let pax = state
+            .world
+            .passengers
+            .read()
+            .expect("passengers rwlock poisoned");
+        (pax.list().to_vec(), pax.deleted().to_vec())
+    };
+    let (active_res, deleted_res) = {
+        let res = state
+            .world
+            .resources
+            .read()
+            .expect("resources rwlock poisoned");
+        (res.list().to_vec(), res.deleted().to_vec())
+    };
+    // FIX: sync_all wraps all three entity tables in a single BEGIN IMMEDIATE /
+    // COMMIT transaction so a crash mid-flush cannot produce split-brain state.
+    store.sync_all(&leads, &active_pax, &deleted_pax, &active_res, &deleted_res);
 }
 
 /// Axum extractor that resolves an `Authorization: Bearer <token>` header
@@ -451,42 +536,67 @@ async fn health() -> &'static str {
     ))]
 async fn health_ready(State(state): State<AppState>) -> Response {
     use crate::application::ports::UsageEventSource;
-    match state.world.read() {
-        Err(_) => (
+    // DB liveness check — entity_store is immutable after init, no lock needed.
+    if let Some(false) = state
+        .world
+        .entity_store
+        .as_ref()
+        .map(SqliteEntityStore::ping_db)
+    {
+        return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ErrorBody {
-                error: "world rwlock poisoned".into(),
-                code: "InternalError".into(),
+                error: "database unreachable".into(),
+                code: "DatabaseUnreachable".into(),
             }),
         )
-            .into_response(),
-        Ok(w) => {
-            // P9: verify SQLite is reachable before reporting "ready".
-            // Returns 503 DatabaseUnreachable if the DB file is gone or
-            // the connection is broken — lets k8s stop routing traffic.
-            if let Some(false) = w.ping_db() {
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(ErrorBody {
-                        error: "database unreachable".into(),
-                        code: "DatabaseUnreachable".into(),
-                    }),
-                )
-                    .into_response();
-            }
-            Json(HealthReadyDto {
-                status: "ready".into(),
-                // env!() is resolved at compile time — zero runtime cost.
-                version: env!("CARGO_PKG_VERSION").to_owned(),
-                crew_leads: w.crew_leads.list().len(),
-                passengers_active: w.passengers.list().len(),
-                resources_active: w.resources.list().len(),
-                usage_events: w.access.sink().list().len(),
-                admin_events: w.audit_sink.snapshot().len(),
-            })
-            .into_response()
-        }
+            .into_response();
     }
+    // Collect counts under per-aggregate read locks. Each lock is acquired and
+    // released individually — a poisoned lock returns 503 for early detection.
+    macro_rules! read_or_503 {
+        ($lock:expr, $label:literal) => {
+            match $lock.read() {
+                Ok(g) => g,
+                Err(_) => {
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(ErrorBody {
+                            error: concat!($label, " rwlock poisoned").into(),
+                            code: "InternalError".into(),
+                        }),
+                    )
+                        .into_response()
+                }
+            }
+        };
+    }
+    let crew_leads_count = read_or_503!(state.world.crew_leads, "crew_leads")
+        .list()
+        .len();
+    let passengers_count = read_or_503!(state.world.passengers, "passengers")
+        .list()
+        .len();
+    let resources_count = read_or_503!(state.world.resources, "resources")
+        .list()
+        .len();
+    let usage_count = read_or_503!(state.world.access, "access")
+        .sink()
+        .list()
+        .len();
+    let admin_count = read_or_503!(state.world.audit_sink, "audit_sink")
+        .snapshot()
+        .len();
+    Json(HealthReadyDto {
+        status: "ready".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        crew_leads: crew_leads_count,
+        passengers_active: passengers_count,
+        resources_active: resources_count,
+        usage_events: usage_count,
+        admin_events: admin_count,
+    })
+    .into_response()
 }
 
 /// Prometheus text format metrics. Not included in the `OpenAPI` spec
@@ -494,10 +604,50 @@ async fn health_ready(State(state): State<AppState>) -> Response {
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     use crate::application::ports::UsageEventSource;
     use crate::domain::usage_event::Outcome;
-    let w = read_world(&state);
-    let usage = w.access.sink().list();
-    let allowed = usage.iter().filter(|e| e.outcome == Outcome::Allowed).count();
-    let denied = usage.iter().filter(|e| e.outcome == Outcome::Denied).count();
+    // Collect each metric under its own brief read lock.
+    let crew_leads = state
+        .world
+        .crew_leads
+        .read()
+        .expect("crew_leads rwlock poisoned")
+        .list()
+        .len();
+    let passengers = state
+        .world
+        .passengers
+        .read()
+        .expect("passengers rwlock poisoned")
+        .list()
+        .len();
+    let resources = state
+        .world
+        .resources
+        .read()
+        .expect("resources rwlock poisoned")
+        .list()
+        .len();
+    let admin = state
+        .world
+        .audit_sink
+        .read()
+        .expect("audit_sink rwlock poisoned")
+        .snapshot()
+        .len();
+    let (usage_total, allowed, denied) = {
+        let access = state.world.access.read().expect("access rwlock poisoned");
+        let usage = access.sink().list();
+        (
+            usage.len(),
+            usage
+                .iter()
+                .filter(|e| e.outcome == Outcome::Allowed)
+                .count(),
+            usage
+                .iter()
+                .filter(|e| e.outcome == Outcome::Denied)
+                .count(),
+        )
+    };
     let body = format!(
         "# HELP prms_crew_leads_total Active crew leads.\n\
          # TYPE prms_crew_leads_total gauge\n\
@@ -520,13 +670,6 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
          # HELP prms_admin_events_total Total admin events recorded.\n\
          # TYPE prms_admin_events_total counter\n\
          prms_admin_events_total {admin}\n",
-        crew_leads = w.crew_leads.list().len(),
-        passengers = w.passengers.list().len(),
-        resources = w.resources.list().len(),
-        usage_total = usage.len(),
-        allowed = allowed,
-        denied = denied,
-        admin = w.audit_sink.snapshot().len(),
     );
     (
         [(
@@ -544,9 +687,13 @@ async fn list_crew_leads(
     State(state): State<AppState>,
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<CrewLeadDto>> {
-    let w = read_world(&state);
+    let crew_leads = state
+        .world
+        .crew_leads
+        .read()
+        .expect("crew_leads rwlock poisoned");
     Json(
-        w.crew_leads
+        crew_leads
             .list()
             .iter()
             .skip(page.offset())
@@ -565,33 +712,29 @@ async fn list_crew_leads(
         (status = 403, body = ErrorBody)))]
 async fn replace_crew_lead(
     State(state): State<AppState>,
-    // Each function argument is a separate axum extractor. Order DOES
-    // matter: the body extractor (`Json<...>`) MUST come last because
-    // it consumes the request body. Using two body extractors is a
-    // compile error caught by axum's trait bounds.
     Path(old_id): Path<String>,
     AuthActor(actor_id): AuthActor,
     Json(req): Json<ReplaceCrewLeadReq>,
 ) -> Response {
-    // Validate the new crew lead's string fields before touching domain logic.
     if let Err(msg) = req.new_lead.validate() {
         return bad_request(msg);
     }
-    // Capture IDs for tracing before they are moved into CrewLeadId wrappers.
     let new_id_for_log = req.new_lead.id.clone();
-    // `&mut w` because `replace_audited` mutates the service state.
-    let mut w = write_world(&state);
-    match w.crew_leads.replace_audited(
-        &CrewLeadId(actor_id.clone()),
-        &CrewLeadId(old_id.clone()),
-        // `req.new_lead.into()` calls `From<CrewLeadDto> for CrewLead`.
-        req.new_lead.into(),
-    ) {
-        // `Ok(())` matches the unit-Ok variant. `()` is the empty tuple
-        // (Rust's "void"). NO_CONTENT (204) is the conventional response
-        // for successful mutations with no body to return.
+    let result = {
+        let mut crew_leads = state
+            .world
+            .crew_leads
+            .write()
+            .expect("crew_leads rwlock poisoned");
+        crew_leads.replace_audited(
+            &CrewLeadId(actor_id.clone()),
+            &CrewLeadId(old_id.clone()),
+            req.new_lead.into(),
+        )
+    }; // write lock released before flush
+    match result {
         Ok(()) => {
-            w.flush_to_db();
+            flush_to_db(&state);
             tracing::info!(old_id = %old_id, new_id = %new_id_for_log, actor = %actor_id, "crew lead replaced");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -606,9 +749,13 @@ async fn list_passengers(
     State(state): State<AppState>,
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<PassengerDto>> {
-    let w = read_world(&state);
+    let passengers = state
+        .world
+        .passengers
+        .read()
+        .expect("passengers rwlock poisoned");
     Json(
-        w.passengers
+        passengers
             .list()
             .iter()
             .skip(page.offset())
@@ -629,11 +776,9 @@ async fn create_passenger(
     headers: axum::http::HeaderMap,
     Json(req): Json<CreatePassengerReq>,
 ) -> Response {
-    // Validate string lengths at the boundary before touching domain logic.
     if let Err(msg) = req.validate() {
         return bad_request(msg);
     }
-    // Idempotency: return the cached response if the key was seen before.
     let idem_key = headers
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
@@ -641,23 +786,22 @@ async fn create_passenger(
     if let Some(cached) = idem_key.as_deref().and_then(|k| idempotency_get(&state, k)) {
         return cached;
     }
-    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
-    match w
-        .passengers
-        .create(&actor, PassengerId(req.id.clone()), req.name, Tier::from(req.tier))
-    {
+    let result = {
+        let mut passengers = state
+            .world
+            .passengers
+            .write()
+            .expect("passengers rwlock poisoned");
+        passengers.create(&actor, PassengerId(req.id), req.name, Tier::from(req.tier))
+    }; // write lock released before flush
+    match result {
         Ok(p) => {
-            w.flush_to_db();
+            flush_to_db(&state);
             tracing::info!(passenger_id = %p.id.0, tier = ?p.tier, actor = %actor_id, "passenger created");
             let dto = PassengerDto::from(&p);
-            // FIX: use expect — serialization of a fixed DTO is an invariant, not
-            // a recoverable error. unwrap_or_default() would cache empty bytes and
-            // return a silent empty body on retry.
-            let body = serde_json::to_vec(&dto)
-                .expect("PassengerDto serialization is infallible");
+            let body = serde_json::to_vec(&dto).expect("PassengerDto serialization is infallible");
             if let Some(key) = idem_key {
-                // FIX: body is not used after this point; drop the redundant clone.
                 idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body));
             }
             (StatusCode::CREATED, Json(dto)).into_response()
@@ -676,14 +820,18 @@ async fn change_passenger_tier(
     AuthActor(actor_id): AuthActor,
     Json(req): Json<ChangeTierReq>,
 ) -> Response {
-    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
-    match w
-        .passengers
-        .change_tier(&actor, &PassengerId(id.clone()), Tier::from(req.tier))
-    {
+    let result = {
+        let mut passengers = state
+            .world
+            .passengers
+            .write()
+            .expect("passengers rwlock poisoned");
+        passengers.change_tier(&actor, &PassengerId(id.clone()), Tier::from(req.tier))
+    };
+    match result {
         Ok(()) => {
-            w.flush_to_db();
+            flush_to_db(&state);
             tracing::info!(passenger_id = %id, tier = ?req.tier, actor = %actor_id, "passenger tier changed");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -699,11 +847,18 @@ async fn soft_delete_passenger(
     Path(id): Path<String>,
     AuthActor(actor_id): AuthActor,
 ) -> Response {
-    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
-    match w.passengers.soft_delete(&actor, &PassengerId(id.clone())) {
+    let result = {
+        let mut passengers = state
+            .world
+            .passengers
+            .write()
+            .expect("passengers rwlock poisoned");
+        passengers.soft_delete(&actor, &PassengerId(id.clone()))
+    };
+    match result {
         Ok(()) => {
-            w.flush_to_db();
+            flush_to_db(&state);
             tracing::info!(passenger_id = %id, actor = %actor_id, "passenger soft-deleted");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -718,9 +873,13 @@ async fn list_resources(
     State(state): State<AppState>,
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<ResourceDto>> {
-    let w = read_world(&state);
+    let resources = state
+        .world
+        .resources
+        .read()
+        .expect("resources rwlock poisoned");
     Json(
-        w.resources
+        resources
             .list()
             .iter()
             .skip(page.offset())
@@ -741,11 +900,9 @@ async fn create_resource(
     headers: axum::http::HeaderMap,
     Json(req): Json<CreateResourceReq>,
 ) -> Response {
-    // Validate string lengths at the boundary before touching domain logic.
     if let Err(msg) = req.validate() {
         return bad_request(msg);
     }
-    // Idempotency: return the cached response if the key was seen before.
     let idem_key = headers
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
@@ -753,26 +910,28 @@ async fn create_resource(
     if let Some(cached) = idem_key.as_deref().and_then(|k| idempotency_get(&state, k)) {
         return cached;
     }
-    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
-    match w.resources.create(
-        &actor,
-        ResourceId(req.id),
-        req.name,
-        req.category,
-        Tier::from(req.min_tier),
-    ) {
+    let result = {
+        let mut resources = state
+            .world
+            .resources
+            .write()
+            .expect("resources rwlock poisoned");
+        resources.create(
+            &actor,
+            ResourceId(req.id),
+            req.name,
+            req.category,
+            Tier::from(req.min_tier),
+        )
+    }; // write lock released before flush
+    match result {
         Ok(r) => {
-            w.flush_to_db();
+            flush_to_db(&state);
             tracing::info!(resource_id = %r.id.0, min_tier = ?r.min_tier, actor = %actor_id, "resource created");
             let dto = ResourceDto::from(&r);
-            // FIX: use expect — serialization of a fixed DTO is an invariant, not
-            // a recoverable error. unwrap_or_default() would cache empty bytes and
-            // return a silent empty body on retry.
-            let body = serde_json::to_vec(&dto)
-                .expect("ResourceDto serialization is infallible");
+            let body = serde_json::to_vec(&dto).expect("ResourceDto serialization is infallible");
             if let Some(key) = idem_key {
-                // FIX: body is not used after this point; drop the redundant clone.
                 idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body));
             }
             (StatusCode::CREATED, Json(dto)).into_response()
@@ -791,14 +950,18 @@ async fn change_resource_min_tier(
     AuthActor(actor_id): AuthActor,
     Json(req): Json<ChangeTierReq>,
 ) -> Response {
-    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
-    match w
-        .resources
-        .change_min_tier(&actor, &ResourceId(id.clone()), Tier::from(req.tier))
-    {
+    let result = {
+        let mut resources = state
+            .world
+            .resources
+            .write()
+            .expect("resources rwlock poisoned");
+        resources.change_min_tier(&actor, &ResourceId(id.clone()), Tier::from(req.tier))
+    };
+    match result {
         Ok(()) => {
-            w.flush_to_db();
+            flush_to_db(&state);
             tracing::info!(resource_id = %id, min_tier = ?req.tier, actor = %actor_id, "resource min-tier changed");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -814,11 +977,18 @@ async fn soft_delete_resource(
     Path(id): Path<String>,
     AuthActor(actor_id): AuthActor,
 ) -> Response {
-    let mut w = write_world(&state);
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
-    match w.resources.soft_delete(&actor, &ResourceId(id.clone())) {
+    let result = {
+        let mut resources = state
+            .world
+            .resources
+            .write()
+            .expect("resources rwlock poisoned");
+        resources.soft_delete(&actor, &ResourceId(id.clone()))
+    };
+    match result {
         Ok(()) => {
-            w.flush_to_db();
+            flush_to_db(&state);
             tracing::info!(resource_id = %id, actor = %actor_id, "resource soft-deleted");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -836,27 +1006,32 @@ async fn use_resource(
     AuthActor(actor_id): AuthActor,
     Json(req): Json<UseResourceReq>,
 ) -> Response {
-    // Validate string lengths at the boundary before touching domain logic.
     if let Err(msg) = req.validate() {
         return bad_request(msg);
     }
-    let mut w = write_world(&state);
     let actor = Actor::Passenger(PassengerId(actor_id.clone()));
-    // BORROW SPLITTING: `access.use_resource` needs `&mut self` on
-    // `access` AND immutable borrows on `passengers` + `resources`,
-    // all from the same `World`. The borrow checker won't let us call
-    // `w.passengers.list()` while we hold `&mut w.access`, so we
-    // destructure `*w` once into separate field bindings — the
-    // compiler now sees three INDEPENDENT borrows it can track.
-    // `..` ignores the remaining fields we don't need (`audit_sink`,
-    // `crew_leads`).
-    let World {
-        passengers,
-        resources,
-        access,
-        ..
-    } = &mut *w;
-    match access.use_resource(&actor, passengers, resources, &ResourceId(req.resource_id)) {
+    // Acquire in canonical order (passengers → resources → access) to prevent
+    // deadlocks if another handler holds a subset of these locks concurrently.
+    // Per-aggregate locks replace the old borrow-splitting pattern:
+    //   passengers and resources are read-locked (shareable),
+    //   access is write-locked (exclusive, needed to append the usage event).
+    let passengers = state
+        .world
+        .passengers
+        .read()
+        .expect("passengers rwlock poisoned");
+    let resources = state
+        .world
+        .resources
+        .read()
+        .expect("resources rwlock poisoned");
+    let mut access = state.world.access.write().expect("access rwlock poisoned");
+    match access.use_resource(
+        &actor,
+        &*passengers,
+        &*resources,
+        &ResourceId(req.resource_id),
+    ) {
         Ok(ev) => {
             tracing::info!(
                 passenger_id = %actor_id,
@@ -877,9 +1052,13 @@ async fn list_admin_events(
     State(state): State<AppState>,
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<AdminEventDto>> {
-    let w = read_world(&state);
+    let audit_sink = state
+        .world
+        .audit_sink
+        .read()
+        .expect("audit_sink rwlock poisoned");
     Json(
-        w.audit_sink
+        audit_sink
             .snapshot()
             .iter()
             .skip(page.offset())
@@ -897,9 +1076,9 @@ async fn list_usage_events(
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<UsageEventDto>> {
     use crate::application::ports::UsageEventSource;
-    let w = read_world(&state);
+    let access = state.world.access.read().expect("access rwlock poisoned");
     Json(
-        w.access
+        access
             .sink()
             .list()
             .iter()
@@ -914,8 +1093,8 @@ async fn list_usage_events(
     responses((status = 200, body = Vec<TierCountsDto>)))]
 async fn report_by_tier(State(state): State<AppState>) -> Json<Vec<TierCountsDto>> {
     use crate::application::reporting_service::ReportingService;
-    let w = read_world(&state);
-    let report = ReportingService::new(w.access.sink()).aggregate_by_tier();
+    let access = state.world.access.read().expect("access rwlock poisoned");
+    let report = ReportingService::new(access.sink()).aggregate_by_tier();
     let mut rows: Vec<TierCountsDto> = report
         .into_iter()
         .map(|(tier, c)| TierCountsDto {
@@ -924,11 +1103,10 @@ async fn report_by_tier(State(state): State<AppState>) -> Json<Vec<TierCountsDto
             denied: c.denied,
         })
         .collect();
-    // Stable ordering: Silver, Gold, Diamond, Platinum
     rows.sort_by_key(|r| match r.tier {
-        TierDto::Silver   => 0,
-        TierDto::Gold     => 1,
-        TierDto::Diamond  => 2,
+        TierDto::Silver => 0,
+        TierDto::Gold => 1,
+        TierDto::Diamond => 2,
         TierDto::Platinum => 3,
     });
     Json(rows)
@@ -942,10 +1120,10 @@ async fn report_top_resources(
     Query(q): Query<TopNQuery>,
 ) -> Json<Vec<TopResourceDto>> {
     use crate::application::reporting_service::ReportingService;
-    let w = read_world(&state);
+    let access = state.world.access.read().expect("access rwlock poisoned");
     let n = q.n.unwrap_or(5);
     Json(
-        ReportingService::new(w.access.sink())
+        ReportingService::new(access.sink())
             .top_resources(n)
             .into_iter()
             .map(|(rid, count)| TopResourceDto {
@@ -964,9 +1142,9 @@ async fn report_personal_history(
     Path(passenger_id): Path<String>,
 ) -> Json<Vec<UsageEventDto>> {
     use crate::application::reporting_service::ReportingService;
-    let w = read_world(&state);
+    let access = state.world.access.read().expect("access rwlock poisoned");
     Json(
-        ReportingService::new(w.access.sink())
+        ReportingService::new(access.sink())
             .personal_history(&PassengerId(passenger_id))
             .iter()
             .map(UsageEventDto::from)
@@ -987,12 +1165,17 @@ async fn add_crew_lead(
     Json(req): Json<AddCrewLeadReq>,
 ) -> Response {
     let new_id = req.lead.id.clone();
-    let mut w = write_world(&state);
-    // CL-R2 — always 409 (`CrewLeadLimitReached`) by design.
-    match w.crew_leads.add(req.lead.into()) {
+    let result = {
+        let mut crew_leads = state
+            .world
+            .crew_leads
+            .write()
+            .expect("crew_leads rwlock poisoned");
+        crew_leads.add(req.lead.into())
+    };
+    match result {
         Ok(()) => {
-            // FIX: flush entity state so the new crew lead survives a restart.
-            w.flush_to_db();
+            flush_to_db(&state);
             tracing::info!(new_id = %new_id, actor = %actor_id, "crew lead added");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1011,13 +1194,17 @@ async fn remove_crew_lead(
     AuthActor(actor_id): AuthActor,
     Path(id): Path<String>,
 ) -> Response {
-    let mut w = write_world(&state);
-    // CL-R3 — always 409 (`CrewLeadMinimumBreached`) by design.
-    match w.crew_leads.remove(&CrewLeadId(id.clone())) {
+    let result = {
+        let mut crew_leads = state
+            .world
+            .crew_leads
+            .write()
+            .expect("crew_leads rwlock poisoned");
+        crew_leads.remove(&CrewLeadId(id.clone()))
+    };
+    match result {
         Ok(()) => {
-            // FIX: flush entity state so the removed crew lead does not
-            // reappear after a restart.
-            w.flush_to_db();
+            flush_to_db(&state);
             tracing::info!(removed_id = %id, actor = %actor_id, "crew lead removed");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1029,8 +1216,12 @@ async fn remove_crew_lead(
     params(("id" = String, Path)),
     responses((status = 200, body = PassengerDto), (status = 404, body = ErrorBody)))]
 async fn get_passenger(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    let w = read_world(&state);
-    match w.passengers.get(&PassengerId(id)) {
+    let passengers = state
+        .world
+        .passengers
+        .read()
+        .expect("passengers rwlock poisoned");
+    match passengers.get(&PassengerId(id)) {
         Ok(p) => (StatusCode::OK, Json(PassengerDto::from(p))).into_response(),
         Err(e) => err_response_owned(&e),
     }
@@ -1040,8 +1231,12 @@ async fn get_passenger(State(state): State<AppState>, Path(id): Path<String>) ->
     params(("id" = String, Path)),
     responses((status = 200, body = ResourceDto), (status = 404, body = ErrorBody)))]
 async fn get_resource(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    let w = read_world(&state);
-    match w.resources.get(&ResourceId(id)) {
+    let resources = state
+        .world
+        .resources
+        .read()
+        .expect("resources rwlock poisoned");
+    match resources.get(&ResourceId(id)) {
         Ok(r) => (StatusCode::OK, Json(ResourceDto::from(r))).into_response(),
         Err(e) => err_response_owned(&e),
     }
@@ -1054,9 +1249,13 @@ async fn list_accessible_resources(
     State(state): State<AppState>,
     Query(q): Query<AccessibleQuery>,
 ) -> Json<Vec<ResourceDto>> {
-    let w = read_world(&state);
+    let resources = state
+        .world
+        .resources
+        .read()
+        .expect("resources rwlock poisoned");
     Json(
-        w.resources
+        resources
             .list_accessible_for(Tier::from(q.tier))
             .iter()
             .map(ResourceDto::from)
@@ -1066,41 +1265,67 @@ async fn list_accessible_resources(
 
 #[utoipa::path(post, path = "/reset", tag = "system",
     responses((status = 204), (status = 401, body = ErrorBody), (status = 403, body = ErrorBody)))]
-async fn reset_world(
-    State(state): State<AppState>,
-    AuthActor(actor_id): AuthActor,
-) -> Response {
-    // Demo-only affordance, but still gated: caller must identify as
-    // an existing crew lead so an anonymous client can't wipe state.
+async fn reset_world(State(state): State<AppState>, AuthActor(actor_id): AuthActor) -> Response {
+    // Gate: caller must be an existing crew lead.
     {
-        // Inner block scopes the read guard so it's RELEASED before
-        // the `*write_world(...) = fresh` reassignment below — otherwise
-        // we'd try to acquire a write lock while a read guard is live
-        // (deadlock with RwLock).
-        let w = read_world(&state);
+        let crew_leads = state
+            .world
+            .crew_leads
+            .read()
+            .expect("crew_leads rwlock poisoned");
         let id = CrewLeadId(actor_id.clone());
-        if !w.crew_leads.list().iter().any(|c| c.id == id) {
+        if !crew_leads.list().iter().any(|c| c.id == id) {
             return err_response_owned(&DomainError::UnauthorizedActor);
         }
-    }
+    } // read lock released before write locks below
+
     let fresh = match build_demo_world() {
         Ok(w) => w,
         Err(e) => return err_response_owned(&e),
     };
+    let World {
+        crew_leads: new_cl,
+        passengers: new_pax,
+        resources: new_res,
+        access: new_acc,
+        audit_sink: new_aud,
+        // entity_store: keep the existing store — don't replace it
+        ..
+    } = fresh;
+
+    // Acquire all five write locks in canonical order to atomically replace
+    // all aggregates. Readers are blocked for the brief replacement window.
+    // This is acceptable: reset_world is a demo-only endpoint.
     {
-        let mut w = write_world(&state);
-        // FIX: carry the SQLite entity store forward so the new demo state
-        // is persisted. Without this, the entity_store is dropped when the
-        // old World is replaced, losing all write-through persistence.
-        #[cfg(feature = "http")]
-        let entity_store = w.entity_store.take();
-        *w = fresh;
-        #[cfg(feature = "http")]
-        {
-            w.entity_store = entity_store;
-            w.flush_to_db();
-        }
-    }
+        let mut cl = state
+            .world
+            .crew_leads
+            .write()
+            .expect("crew_leads rwlock poisoned");
+        let mut pax = state
+            .world
+            .passengers
+            .write()
+            .expect("passengers rwlock poisoned");
+        let mut res = state
+            .world
+            .resources
+            .write()
+            .expect("resources rwlock poisoned");
+        let mut acc = state.world.access.write().expect("access rwlock poisoned");
+        let mut aud = state
+            .world
+            .audit_sink
+            .write()
+            .expect("audit_sink rwlock poisoned");
+        *cl = new_cl;
+        *pax = new_pax;
+        *res = new_res;
+        *acc = new_acc;
+        *aud = new_aud;
+    } // all write locks released before flush
+
+    flush_to_db(&state);
     StatusCode::NO_CONTENT.into_response()
 }
 
