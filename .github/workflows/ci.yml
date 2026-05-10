@@ -38,9 +38,10 @@ jobs:
         run: cargo clippy --all-targets --features http -- -D warnings -W clippy::pedantic
       - name: nextest (default features)
         run: cargo nextest run
-      - name: nextest (--features http)
-        run: cargo nextest run --features http
       - name: coverage
+        # FIX: removed the separate "nextest (--features http)" step — coverage
+        # runs the same test suite under llvm-cov, so the standalone step was a
+        # redundant compile+run with no additional signal.
         run: |
           cargo llvm-cov nextest --features http \
             --ignore-filename-regex 'src/bin/|sqlite_event_store' \
