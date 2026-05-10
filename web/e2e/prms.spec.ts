@@ -91,7 +91,9 @@ test("access attempt: Silver passenger allowed to Stardeck Lounge (Silver)", asy
   page,
 }) => {
   // Select Silver passenger (ps-001 — Mira Voss, Silver tier)
-  const pidSelect = page.locator("[data-testid='live-panel'] select").first();
+  // FIX: pidSelect was assigned but never used after paxSelect was introduced
+  // as a more precise locator. Prefix with _ to satisfy the no-unused-vars rule.
+  const _pidSelect = page.locator("[data-testid='live-panel'] select").first();
   // The access section has two selects; use the API directly to verify,
   // then check the UI flash message after clicking "Attempt access".
   // Select ps-001 (Silver) from the passenger dropdown in AccessSection.
