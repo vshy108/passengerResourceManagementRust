@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type JSX } from "react";
 import { api } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 

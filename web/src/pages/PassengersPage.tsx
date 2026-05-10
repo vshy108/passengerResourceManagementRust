@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type JSX } from "react";
 import { api, type Tier } from "../services/api";
 import { useData } from "../contexts/DataContext";
 import { TierTag } from "../components/TierTag";

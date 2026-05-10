@@ -1,3 +1,4 @@
+import { type JSX } from "react";
 import { useData } from "../contexts/DataContext";
 import { TierTag } from "../components/TierTag";
 

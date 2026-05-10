@@ -1,3 +1,4 @@
+import { type JSX } from "react";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { DataProvider } from "./contexts/DataContext";
 import { AppShell } from "./components/AppShell";

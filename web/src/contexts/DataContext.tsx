@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type JSX,
   type ReactNode,
 } from "react";
 import {

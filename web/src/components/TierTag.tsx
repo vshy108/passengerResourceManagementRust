@@ -1,3 +1,4 @@
+import { type JSX } from "react";
 import type { Tier } from "../services/api";
 
 export function TierTag({ tier }: { tier: Tier }): JSX.Element {

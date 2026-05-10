@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type JSX } from "react";
 import { api } from "../services/api";
 import { useData } from "../contexts/DataContext";
 

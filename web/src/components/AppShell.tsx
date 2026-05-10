@@ -1,3 +1,4 @@
+import { type JSX } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
 import { useHash } from "../hooks/useHash";

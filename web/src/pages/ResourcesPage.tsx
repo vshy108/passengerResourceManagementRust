@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type JSX } from "react";
 import { api, type ApiResource, type Tier } from "../services/api";
 import { useData } from "../contexts/DataContext";
 import { TierTag } from "../components/TierTag";
