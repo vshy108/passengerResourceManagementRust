@@ -86,7 +86,7 @@ jobs:
         run: cargo build --release --features http --bin serve
       - name: start PRMS server
         run: |
-          PRMS_API_KEYS='cl-aria-e2e-token:cl-aria,ps-001-token:ps-001' \
+          PRMS_API_KEYS='cl-aria-e2e-token:cl-aria,cl-aria:cl-aria,ps-001:ps-001' \
           PRMS_ENABLE_RESET=true \
           PRMS_ENABLE_RATE_LIMIT=false \
           ./target/release/serve &
