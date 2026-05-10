@@ -379,6 +379,15 @@ pub struct TopNQuery {
     pub n: Option<usize>,
 }
 
+impl TopNQuery {
+    /// Returns `n`, defaulting to 5 and capped at 1 000 to prevent `DoS` via
+    /// unbounded result-set requests at the boundary (OWASP A04).
+    #[must_use]
+    pub fn n(&self) -> usize {
+        self.n.unwrap_or(5).min(1_000)
+    }
+}
+
 /// Offset-based pagination query parameters.
 /// `offset` defaults to 0; `limit` defaults to 100 (max 1000).
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
@@ -390,7 +399,9 @@ pub struct PaginationQuery {
 impl PaginationQuery {
     #[must_use]
     pub fn offset(&self) -> usize {
-        self.offset.unwrap_or(0)
+        // FIX: cap offset so unbounded skip values cannot be used to enumerate
+        // beyond a sane range; mirrors the limit cap for consistency (OWASP A04).
+        self.offset.unwrap_or(0).min(1_000_000)
     }
     #[must_use]
     pub fn limit(&self) -> usize {

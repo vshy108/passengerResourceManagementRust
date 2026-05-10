@@ -1121,7 +1121,7 @@ async fn report_top_resources(
 ) -> Json<Vec<TopResourceDto>> {
     use crate::application::reporting_service::ReportingService;
     let access = state.world.access.read().expect("access rwlock poisoned");
-    let n = q.n.unwrap_or(5);
+    let n = q.n();
     Json(
         ReportingService::new(access.sink())
             .top_resources(n)

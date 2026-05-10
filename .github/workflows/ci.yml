@@ -48,7 +48,7 @@ jobs:
         # redundant compile+run with no additional signal.
         run: |
           cargo llvm-cov nextest --features http \
-            --ignore-filename-regex 'src/bin/|sqlite_event_store' \
+            --ignore-filename-regex 'src/bin/' \
             --fail-under-lines 96
 
   audit:

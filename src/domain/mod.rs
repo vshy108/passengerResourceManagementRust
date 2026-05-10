@@ -3,6 +3,10 @@
 //! No I/O, no clocks, no logging. Everything here is deterministic and
 //! deeply testable.
 
+// Enforced here (not just globally in Cargo.toml) so the domain module
+// carries its own explicit safety contract, visible to any reader.
+#![forbid(unsafe_code)]
+
 // Each `pub mod` corresponds to a sibling `.rs` file in this directory.
 // The presence of `mod.rs` is what makes `domain/` a module (older Rust
 // convention; the newer alternative is a `domain.rs` file beside the
