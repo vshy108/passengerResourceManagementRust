@@ -97,8 +97,16 @@ impl InMemoryAdminEventSink {
     /// Panics if any inner mutex is poisoned.
     #[must_use]
     pub fn snapshot_with_hashes(&self) -> Vec<(AdminEvent, String)> {
-        let events = self.inner.lock().expect("admin sink mutex poisoned").clone();
-        let hashes = self.hashes.lock().expect("admin sink hashes mutex poisoned").clone();
+        let events = self
+            .inner
+            .lock()
+            .expect("admin sink mutex poisoned")
+            .clone();
+        let hashes = self
+            .hashes
+            .lock()
+            .expect("admin sink hashes mutex poisoned")
+            .clone();
         events
             .into_iter()
             .enumerate()
@@ -157,7 +165,6 @@ impl AdminEventSink for InMemoryAdminEventSink {
             .push(new_hash);
     }
 }
-
 
 #[cfg(test)]
 mod tests {

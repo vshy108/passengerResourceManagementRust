@@ -453,7 +453,8 @@ impl PgAdminEventSink {
     #[must_use]
     pub fn new(pool: &PgPool, existing: Vec<AdminEvent>) -> Self {
         use crate::application::ports::AdminEventSink as _;
-        let mut mem = crate::infrastructure::in_memory_admin_event_sink::InMemoryAdminEventSink::new();
+        let mut mem =
+            crate::infrastructure::in_memory_admin_event_sink::InMemoryAdminEventSink::new();
         // Pre-load historical events into the memory buffer without re-writing to PG.
         for ev in existing {
             mem.append(ev);
@@ -521,7 +522,8 @@ impl PgUsageEventSink {
     #[must_use]
     pub fn new(pool: &PgPool, existing: Vec<UsageEvent>) -> Self {
         use crate::application::ports::UsageEventSink as _;
-        let mut mem = crate::infrastructure::in_memory_usage_event_sink::InMemoryUsageEventSink::new();
+        let mut mem =
+            crate::infrastructure::in_memory_usage_event_sink::InMemoryUsageEventSink::new();
         for ev in existing {
             mem.append(ev);
         }
@@ -567,4 +569,3 @@ impl crate::application::ports::UsageEventSource for PgUsageEventSink {
         self.mem.list()
     }
 }
-

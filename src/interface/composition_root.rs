@@ -98,7 +98,11 @@ impl AuditSink {
         match self {
             Self::InMemory(s) => s.snapshot_with_hashes(),
             #[cfg(feature = "http")]
-            Self::Sqlite(s) => s.snapshot().into_iter().map(|ev| (ev, String::new())).collect(),
+            Self::Sqlite(s) => s
+                .snapshot()
+                .into_iter()
+                .map(|ev| (ev, String::new()))
+                .collect(),
             #[cfg(feature = "postgres")]
             Self::Pg(s) => s.snapshot_with_hashes(),
         }
@@ -403,8 +407,10 @@ pub async fn build_world_with_postgres(pg_url: &str) -> Result<World, BuildError
         // persisted per-request, not just on batch sync.
         let admin_events_existing: Vec<crate::domain::admin_event::AdminEvent> = vec![];
         let usage_events_existing: Vec<crate::domain::usage_event::UsageEvent> = vec![];
-        let pg_admin_sink = crate::infrastructure::PgAdminEventSink::new(&pool, admin_events_existing);
-        let pg_usage_sink = crate::infrastructure::PgUsageEventSink::new(&pool, usage_events_existing);
+        let pg_admin_sink =
+            crate::infrastructure::PgAdminEventSink::new(&pool, admin_events_existing);
+        let pg_usage_sink =
+            crate::infrastructure::PgUsageEventSink::new(&pool, usage_events_existing);
         let audit_sink = AuditSink::Pg(pg_admin_sink);
         let usage_sink = UsageSink::Pg(pg_usage_sink);
         let mut world = build_world(audit_sink, usage_sink).map_err(BuildError::Domain)?;

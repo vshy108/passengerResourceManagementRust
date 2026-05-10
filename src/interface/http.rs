@@ -411,14 +411,7 @@ fn err_response_owned(e: &DomainError) -> Response {
     let (status, code) = map_err(e);
     // A tuple `(StatusCode, Json<...>)` implements `IntoResponse`, so
     // chaining `.into_response()` produces a uniform `Response` type.
-    (
-        status,
-        Json(ErrorBody {
-            error: msg,
-            code,
-        }),
-    )
-        .into_response()
+    (status, Json(ErrorBody { error: msg, code })).into_response()
 }
 
 /// Return a 400 Bad Request response with a plain message.
@@ -886,8 +879,10 @@ async fn change_passenger_tier(
             .expect("passengers rwlock poisoned");
         // Optimistic concurrency check: If-Match version must match current version.
         // Performed inside the write lock so the check + mutation are atomic.
-        if let (Some(ev), Ok(p)) = (parse_if_match(&headers), passengers.get(&PassengerId(id.clone())))
-            && p.version != ev
+        if let (Some(ev), Ok(p)) = (
+            parse_if_match(&headers),
+            passengers.get(&PassengerId(id.clone())),
+        ) && p.version != ev
         {
             return version_conflict();
         }
@@ -925,8 +920,10 @@ async fn soft_delete_passenger(
             .write()
             .expect("passengers rwlock poisoned");
         // Optimistic concurrency check inside the write lock.
-        if let (Some(ev), Ok(p)) = (parse_if_match(&headers), passengers.get(&PassengerId(id.clone())))
-            && p.version != ev
+        if let (Some(ev), Ok(p)) = (
+            parse_if_match(&headers),
+            passengers.get(&PassengerId(id.clone())),
+        ) && p.version != ev
         {
             return version_conflict();
         }
@@ -1050,8 +1047,10 @@ async fn change_resource_min_tier(
             .write()
             .expect("resources rwlock poisoned");
         // Optimistic concurrency check inside the write lock.
-        if let (Some(ev), Ok(r)) = (parse_if_match(&headers), resources.get(&ResourceId(id.clone())))
-            && r.version != ev
+        if let (Some(ev), Ok(r)) = (
+            parse_if_match(&headers),
+            resources.get(&ResourceId(id.clone())),
+        ) && r.version != ev
         {
             return version_conflict();
         }
@@ -1089,8 +1088,10 @@ async fn soft_delete_resource(
             .write()
             .expect("resources rwlock poisoned");
         // Optimistic concurrency check inside the write lock.
-        if let (Some(ev), Ok(r)) = (parse_if_match(&headers), resources.get(&ResourceId(id.clone())))
-            && r.version != ev
+        if let (Some(ev), Ok(r)) = (
+            parse_if_match(&headers),
+            resources.get(&ResourceId(id.clone())),
+        ) && r.version != ev
         {
             return version_conflict();
         }
