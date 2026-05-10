@@ -16,6 +16,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # Opt into Node.js 24 for all actions now — Node 20 actions are deprecated
+  # and will be forcibly migrated on June 2, 2026.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   rust:
