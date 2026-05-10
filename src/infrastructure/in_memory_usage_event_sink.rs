@@ -6,7 +6,8 @@ use crate::domain::usage_event::UsageEvent;
 
 // `Default` derive auto-generates `new()-equivalent` factories: every
 // field gets its type's default (`Vec::new()` for the events vec).
-#[derive(Debug, Default)]
+// `Clone` is needed by PgUsageEventSink which wraps this type and derives Clone.
+#[derive(Debug, Default, Clone)]
 pub struct InMemoryUsageEventSink {
     events: Vec<UsageEvent>,
 }

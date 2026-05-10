@@ -18,7 +18,12 @@ export type ApiTierCount   = components["schemas"]["TierCountsDto"];
 export type ApiTopResource = components["schemas"]["TopResourceDto"];
 export type Tier           = components["schemas"]["TierDto"];
 
-export type DomainError = string;
+// FIX: ErrorCode is now generated from the Rust enum so TypeScript has a
+// closed union type instead of `string`. The generated type covers all server
+// error codes; client-side codes (NetworkError, Unknown) are added as a union.
+export type ErrorCode    = components["schemas"]["ErrorCode"];
+export type DomainError  = ErrorCode | "NetworkError" | "Unknown";
+
 export type Result<T> = { ok: true; value: T } | { ok: false; error: DomainError };
 function ok<T>(value: T): Result<T> { return { ok: true, value }; }
 function err(error: DomainError): Result<never> { return { ok: false, error }; }
@@ -31,7 +36,10 @@ function getBase(): string {
   return (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
 }
 
-const KNOWN_CODES: ReadonlySet<string> = new Set<DomainError>([
+/** Known server-side error codes. Add client-side codes (NetworkError, Unknown)
+ * to the set only for runtime validation — they are NOT in the generated type.
+ */
+const KNOWN_CODES: ReadonlySet<string> = new Set<string>([
   "UnauthorizedActor",
   "AccessDenied",
   "PassengerNotFound",
@@ -45,6 +53,9 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<DomainError>([
   "CrewLeadBootstrapInvalid",
   "InvalidInput",
   "Unauthorized",
+  "VersionConflict",
+  "InternalError",
+  "DatabaseUnreachable",
   "NetworkError",
   "Unknown",
 ]);

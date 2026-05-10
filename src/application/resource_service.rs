@@ -77,6 +77,7 @@ impl<C: Clock> ResourceService<C> {
             category,
             min_tier,
             deleted_at: None,
+            version: 0,
         };
         self.active.push(r.clone());
         self.emit(
@@ -105,6 +106,8 @@ impl<C: Clock> ResourceService<C> {
             .find(|r| r.id == *id)
             .ok_or(DomainError::ResourceNotFound)?;
         slot.min_tier = new_tier;
+        // Increment version so concurrent If-Match checks on the old version fail.
+        slot.version += 1;
         self.emit(
             &actor_id,
             AdminAction::ResourceMinTierChanged,
@@ -127,6 +130,8 @@ impl<C: Clock> ResourceService<C> {
             .ok_or(DomainError::ResourceNotFound)?;
         let mut r = self.active.remove(pos);
         r.deleted_at = Some(self.clock.now());
+        // Increment version so any in-flight If-Match request with the old version fails.
+        r.version += 1;
         self.deleted.push(r);
         self.emit(&actor_id, AdminAction::ResourceDeleted, id.0.clone(), None);
         Ok(())

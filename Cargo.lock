@@ -1273,10 +1273,12 @@ version = "1.0.0"
 dependencies = [
  "axum",
  "clap",
+ "hex",
  "http-body-util",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "subtle",
  "thiserror 2.0.18",

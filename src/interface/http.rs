@@ -60,10 +60,10 @@ use crate::infrastructure::SqliteEntityStore;
 use crate::infrastructure::fake_clock::FakeClock;
 use crate::interface::composition_root::{AuditSink, UsageSink, World, build_demo_world};
 use crate::interface::dto::{
-    AccessibleQuery, AddCrewLeadReq, AdminEventDto, ChangeTierReq, CreatePassengerReq,
-    CreateResourceReq, CrewLeadDto, ErrorBody, HealthReadyDto, OutcomeDto, PaginationQuery,
-    PassengerDto, ReplaceCrewLeadReq, ResourceDto, TierCountsDto, TierDto, TopNQuery,
-    TopResourceDto, UsageEventDto, UseResourceReq,
+    AccessibleQuery, AddCrewLeadReq, AdminEventDto, AuditVerifyDto, ChangeTierReq,
+    CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, ErrorCode, HealthReadyDto,
+    OutcomeDto, PaginationQuery, PassengerDto, ReplaceCrewLeadReq, ResourceDto, SoftDeleteQuery,
+    TierCountsDto, TierDto, TopNQuery, TopResourceDto, UsageEventDto, UseResourceReq,
 };
 
 /// Cached idempotency response: raw body bytes, status code, and Unix-second expiry.
@@ -255,11 +255,10 @@ pub fn router_with(
 
     // Builder-style chain. Each `.route(...)` returns a new Router with
     // one more endpoint registered. `Router::new()` starts empty.
-    Router::new()
-        .route("/health", get(health))
-        .route("/health/ready", get(health_ready))
-        .route("/metrics", get(metrics))
-        .route("/openapi.json", get(openapi_json))
+    // `api_routes` is built WITHOUT state so it can be nested under /v1/
+    // AND merged at root — both /passengers and /v1/passengers work.
+    // This is the dual-routing strategy for API versioning (#9).
+    let api_routes: Router<AppState> = Router::new()
         // crew leads
         // `.post(handler)` chained after `.get(...)` registers a second
         // method on the same path. `{old_id}` is a path parameter
@@ -288,6 +287,7 @@ pub fn router_with(
         .route("/access", post(use_resource))
         // audit + usage
         .route("/audit", get(list_admin_events))
+        .route("/audit/verify", get(verify_audit_chain))
         .route("/usage", get(list_usage_events))
         // reports
         .route("/reports/by-tier", get(report_by_tier))
@@ -295,7 +295,18 @@ pub fn router_with(
         .route(
             "/reports/history/{passenger_id}",
             get(report_personal_history),
-        )
+        );
+
+    Router::new()
+        .route("/health", get(health))
+        .route("/health/ready", get(health_ready))
+        .route("/metrics", get(metrics))
+        .route("/openapi.json", get(openapi_json))
+        // Root routes (current URLs, unchanged for backward compatibility).
+        .merge(api_routes.clone())
+        // /v1/... routes — same handlers, versioned prefix. Clients can adopt
+        // the versioned URLs now; when a v2 is needed only /v1/ stays stable.
+        .nest("/v1", api_routes)
         // admin — only registered when explicitly enabled (not in production)
         .merge(if enable_reset {
             Router::new().route("/reset", post(reset_world))
@@ -367,23 +378,30 @@ pub fn router_with(
 // ---------- error mapping ----------------------------------------------
 
 /// `DomainError` → HTTP. Validation failures at the boundary use 400;
-/// authorisation 403; not-found 404; conflicts 409. New variants get a
-/// default 500 to surface unhandled cases.
-fn map_err(e: &DomainError) -> (StatusCode, &'static str) {
+/// authorisation 403; not-found 404; conflicts 409; version mismatch 412.
+/// New variants get a default 500 to surface unhandled cases.
+fn map_err(e: &DomainError) -> (StatusCode, ErrorCode) {
     // `use DomainError as D;` is a local alias for brevity in the match.
     use DomainError as D;
     match e {
-        D::UnauthorizedActor => (StatusCode::FORBIDDEN, "UnauthorizedActor"),
-        D::AccessDenied => (StatusCode::FORBIDDEN, "AccessDenied"),
-        D::CrewLeadNotFound => (StatusCode::NOT_FOUND, "CrewLeadNotFound"),
-        D::PassengerNotFound => (StatusCode::NOT_FOUND, "PassengerNotFound"),
-        D::ResourceNotFound => (StatusCode::NOT_FOUND, "ResourceNotFound"),
-        D::CrewLeadAlreadyExists => (StatusCode::CONFLICT, "CrewLeadAlreadyExists"),
-        D::PassengerAlreadyExists => (StatusCode::CONFLICT, "PassengerAlreadyExists"),
-        D::ResourceAlreadyExists => (StatusCode::CONFLICT, "ResourceAlreadyExists"),
-        D::CrewLeadLimitReached => (StatusCode::CONFLICT, "CrewLeadLimitReached"),
-        D::CrewLeadMinimumBreached => (StatusCode::CONFLICT, "CrewLeadMinimumBreached"),
-        D::CrewLeadBootstrapInvalid => (StatusCode::BAD_REQUEST, "CrewLeadBootstrapInvalid"),
+        D::UnauthorizedActor => (StatusCode::FORBIDDEN, ErrorCode::UnauthorizedActor),
+        D::AccessDenied => (StatusCode::FORBIDDEN, ErrorCode::AccessDenied),
+        D::CrewLeadNotFound => (StatusCode::NOT_FOUND, ErrorCode::CrewLeadNotFound),
+        D::PassengerNotFound => (StatusCode::NOT_FOUND, ErrorCode::PassengerNotFound),
+        D::ResourceNotFound => (StatusCode::NOT_FOUND, ErrorCode::ResourceNotFound),
+        D::CrewLeadAlreadyExists => (StatusCode::CONFLICT, ErrorCode::CrewLeadAlreadyExists),
+        D::PassengerAlreadyExists => (StatusCode::CONFLICT, ErrorCode::PassengerAlreadyExists),
+        D::ResourceAlreadyExists => (StatusCode::CONFLICT, ErrorCode::ResourceAlreadyExists),
+        D::CrewLeadLimitReached => (StatusCode::CONFLICT, ErrorCode::CrewLeadLimitReached),
+        D::CrewLeadMinimumBreached => (StatusCode::CONFLICT, ErrorCode::CrewLeadMinimumBreached),
+        D::CrewLeadBootstrapInvalid => {
+            (StatusCode::BAD_REQUEST, ErrorCode::CrewLeadBootstrapInvalid)
+        }
+        D::VersionConflict => (StatusCode::PRECONDITION_FAILED, ErrorCode::VersionConflict),
+        // FIX: `#[non_exhaustive]` requires a wildcard arm for forward compatibility
+        // (new domain errors added in future will reach this branch until mapped).
+        #[allow(unreachable_patterns)]
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, ErrorCode::InternalError),
     }
 }
 
@@ -397,7 +415,7 @@ fn err_response_owned(e: &DomainError) -> Response {
         status,
         Json(ErrorBody {
             error: msg,
-            code: code.to_owned(),
+            code,
         }),
     )
         .into_response()
@@ -410,10 +428,32 @@ fn bad_request(msg: &str) -> Response {
         StatusCode::BAD_REQUEST,
         Json(ErrorBody {
             error: msg.to_owned(),
-            code: "InvalidInput".to_owned(),
+            code: ErrorCode::InvalidInput,
         }),
     )
         .into_response()
+}
+
+/// Return a 412 Precondition Failed response for If-Match version mismatches.
+fn version_conflict() -> Response {
+    (
+        StatusCode::PRECONDITION_FAILED,
+        Json(ErrorBody {
+            error: "version conflict \u{2014} record was modified by another request".to_owned(),
+            code: ErrorCode::VersionConflict,
+        }),
+    )
+        .into_response()
+}
+
+/// Parse an `If-Match: "<n>"` header into a `u64` version number.
+/// Returns `None` when the header is absent or unparseable (no-op).
+fn parse_if_match(headers: &axum::http::HeaderMap) -> Option<u64> {
+    headers
+        .get("if-match")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim_matches('"'))
+        .and_then(|s| s.parse().ok())
 }
 
 /// Flush all entity state to `SQLite`. No-op when no entity store is configured.
@@ -506,7 +546,7 @@ impl FromRequestParts<AppState> for AuthActor {
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorBody {
                     error: "missing or invalid bearer token".into(),
-                    code: "Unauthorized".into(),
+                    code: ErrorCode::Unauthorized,
                 }),
             )
                 .into_response()),
@@ -547,7 +587,7 @@ async fn health_ready(State(state): State<AppState>) -> Response {
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ErrorBody {
                 error: "database unreachable".into(),
-                code: "DatabaseUnreachable".into(),
+                code: ErrorCode::DatabaseUnreachable,
             }),
         )
             .into_response();
@@ -563,7 +603,7 @@ async fn health_ready(State(state): State<AppState>) -> Response {
                         StatusCode::SERVICE_UNAVAILABLE,
                         Json(ErrorBody {
                             error: concat!($label, " rwlock poisoned").into(),
-                            code: "InternalError".into(),
+                            code: ErrorCode::InternalError,
                         }),
                     )
                         .into_response()
@@ -743,26 +783,38 @@ async fn replace_crew_lead(
 }
 
 #[utoipa::path(get, path = "/passengers", tag = "passengers",
-    params(PaginationQuery),
+    params(PaginationQuery, SoftDeleteQuery),
     responses((status = 200, body = Vec<PassengerDto>)))]
 async fn list_passengers(
     State(state): State<AppState>,
     Query(page): Query<PaginationQuery>,
+    Query(filter): Query<SoftDeleteQuery>,
 ) -> Json<Vec<PassengerDto>> {
     let passengers = state
         .world
         .passengers
         .read()
         .expect("passengers rwlock poisoned");
-    Json(
+    let items: Vec<PassengerDto> = if filter.include_deleted() {
+        // Include soft-deleted records. active first, then deleted (stable order).
+        passengers
+            .list()
+            .iter()
+            .chain(passengers.deleted().iter())
+            .skip(page.offset())
+            .take(page.limit())
+            .map(PassengerDto::from)
+            .collect()
+    } else {
         passengers
             .list()
             .iter()
             .skip(page.offset())
             .take(page.limit())
             .map(PassengerDto::from)
-            .collect(),
-    )
+            .collect()
+    };
+    Json(items)
 }
 
 #[utoipa::path(post, path = "/passengers", tag = "passengers",
@@ -813,11 +865,16 @@ async fn create_passenger(
 #[utoipa::path(patch, path = "/passengers/{id}/tier", tag = "passengers",
     params(("id" = String, Path)),
     request_body = ChangeTierReq,
-    responses((status = 204), (status = 404, body = ErrorBody)))]
+    responses(
+        (status = 204),
+        (status = 404, body = ErrorBody),
+        (status = 412, description = "If-Match version mismatch", body = ErrorBody)
+    ))]
 async fn change_passenger_tier(
     State(state): State<AppState>,
     Path(id): Path<String>,
     AuthActor(actor_id): AuthActor,
+    headers: axum::http::HeaderMap,
     Json(req): Json<ChangeTierReq>,
 ) -> Response {
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
@@ -827,6 +884,13 @@ async fn change_passenger_tier(
             .passengers
             .write()
             .expect("passengers rwlock poisoned");
+        // Optimistic concurrency check: If-Match version must match current version.
+        // Performed inside the write lock so the check + mutation are atomic.
+        if let (Some(ev), Ok(p)) = (parse_if_match(&headers), passengers.get(&PassengerId(id.clone())))
+            && p.version != ev
+        {
+            return version_conflict();
+        }
         passengers.change_tier(&actor, &PassengerId(id.clone()), Tier::from(req.tier))
     };
     match result {
@@ -841,11 +905,17 @@ async fn change_passenger_tier(
 
 #[utoipa::path(delete, path = "/passengers/{id}", tag = "passengers",
     params(("id" = String, Path)),
-    responses((status = 204), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody)))]
+    responses(
+        (status = 204),
+        (status = 401, body = ErrorBody),
+        (status = 404, body = ErrorBody),
+        (status = 412, description = "If-Match version mismatch", body = ErrorBody)
+    ))]
 async fn soft_delete_passenger(
     State(state): State<AppState>,
     Path(id): Path<String>,
     AuthActor(actor_id): AuthActor,
+    headers: axum::http::HeaderMap,
 ) -> Response {
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
     let result = {
@@ -854,6 +924,12 @@ async fn soft_delete_passenger(
             .passengers
             .write()
             .expect("passengers rwlock poisoned");
+        // Optimistic concurrency check inside the write lock.
+        if let (Some(ev), Ok(p)) = (parse_if_match(&headers), passengers.get(&PassengerId(id.clone())))
+            && p.version != ev
+        {
+            return version_conflict();
+        }
         passengers.soft_delete(&actor, &PassengerId(id.clone()))
     };
     match result {
@@ -867,26 +943,37 @@ async fn soft_delete_passenger(
 }
 
 #[utoipa::path(get, path = "/resources", tag = "resources",
-    params(PaginationQuery),
+    params(PaginationQuery, SoftDeleteQuery),
     responses((status = 200, body = Vec<ResourceDto>)))]
 async fn list_resources(
     State(state): State<AppState>,
     Query(page): Query<PaginationQuery>,
+    Query(filter): Query<SoftDeleteQuery>,
 ) -> Json<Vec<ResourceDto>> {
     let resources = state
         .world
         .resources
         .read()
         .expect("resources rwlock poisoned");
-    Json(
+    let items: Vec<ResourceDto> = if filter.include_deleted() {
+        resources
+            .list()
+            .iter()
+            .chain(resources.deleted().iter())
+            .skip(page.offset())
+            .take(page.limit())
+            .map(ResourceDto::from)
+            .collect()
+    } else {
         resources
             .list()
             .iter()
             .skip(page.offset())
             .take(page.limit())
             .map(ResourceDto::from)
-            .collect(),
-    )
+            .collect()
+    };
+    Json(items)
 }
 
 #[utoipa::path(post, path = "/resources", tag = "resources",
@@ -943,11 +1030,16 @@ async fn create_resource(
 #[utoipa::path(patch, path = "/resources/{id}/min-tier", tag = "resources",
     params(("id" = String, Path)),
     request_body = ChangeTierReq,
-    responses((status = 204), (status = 404, body = ErrorBody)))]
+    responses(
+        (status = 204),
+        (status = 404, body = ErrorBody),
+        (status = 412, description = "If-Match version mismatch", body = ErrorBody)
+    ))]
 async fn change_resource_min_tier(
     State(state): State<AppState>,
     Path(id): Path<String>,
     AuthActor(actor_id): AuthActor,
+    headers: axum::http::HeaderMap,
     Json(req): Json<ChangeTierReq>,
 ) -> Response {
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
@@ -957,6 +1049,12 @@ async fn change_resource_min_tier(
             .resources
             .write()
             .expect("resources rwlock poisoned");
+        // Optimistic concurrency check inside the write lock.
+        if let (Some(ev), Ok(r)) = (parse_if_match(&headers), resources.get(&ResourceId(id.clone())))
+            && r.version != ev
+        {
+            return version_conflict();
+        }
         resources.change_min_tier(&actor, &ResourceId(id.clone()), Tier::from(req.tier))
     };
     match result {
@@ -971,11 +1069,17 @@ async fn change_resource_min_tier(
 
 #[utoipa::path(delete, path = "/resources/{id}", tag = "resources",
     params(("id" = String, Path)),
-    responses((status = 204), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody)))]
+    responses(
+        (status = 204),
+        (status = 401, body = ErrorBody),
+        (status = 404, body = ErrorBody),
+        (status = 412, description = "If-Match version mismatch", body = ErrorBody)
+    ))]
 async fn soft_delete_resource(
     State(state): State<AppState>,
     Path(id): Path<String>,
     AuthActor(actor_id): AuthActor,
+    headers: axum::http::HeaderMap,
 ) -> Response {
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
     let result = {
@@ -984,6 +1088,12 @@ async fn soft_delete_resource(
             .resources
             .write()
             .expect("resources rwlock poisoned");
+        // Optimistic concurrency check inside the write lock.
+        if let (Some(ev), Ok(r)) = (parse_if_match(&headers), resources.get(&ResourceId(id.clone())))
+            && r.version != ev
+        {
+            return version_conflict();
+        }
         resources.soft_delete(&actor, &ResourceId(id.clone()))
     };
     match result {
@@ -1057,15 +1167,75 @@ async fn list_admin_events(
         .audit_sink
         .read()
         .expect("audit_sink rwlock poisoned");
+    // Use snapshot_with_hashes so each DTO carries its chain hash.
+    let with_hashes = audit_sink.snapshot_with_hashes();
     Json(
-        audit_sink
-            .snapshot()
-            .iter()
+        with_hashes
+            .into_iter()
             .skip(page.offset())
             .take(page.limit())
-            .map(AdminEventDto::from)
+            .map(|(ev, hash)| {
+                let mut dto = AdminEventDto::from(&ev);
+                dto.event_hash = hash;
+                dto
+            })
             .collect(),
     )
+}
+
+#[utoipa::path(get, path = "/audit/verify", tag = "audit",
+    responses((status = 200, body = AuditVerifyDto)))]
+async fn verify_audit_chain(State(state): State<AppState>) -> Json<AuditVerifyDto> {
+    use sha2::{Digest, Sha256};
+    let audit_sink = state
+        .world
+        .audit_sink
+        .read()
+        .expect("audit_sink rwlock poisoned");
+    let with_hashes = audit_sink.snapshot_with_hashes();
+    let length = with_hashes.len();
+    // Re-derive the genesis hash to start the chain.
+    let genesis = {
+        let mut h = Sha256::new();
+        h.update(b"genesis");
+        hex::encode(h.finalize())
+    };
+    let mut prev = genesis;
+    let mut broken_at: Option<usize> = None;
+    for (i, (ev, stored_hash)) in with_hashes.iter().enumerate() {
+        // Recompute the expected hash from the event fields + previous hash.
+        let mut h = Sha256::new();
+        h.update(prev.as_bytes());
+        h.update(b"|");
+        h.update(ev.id.as_bytes());
+        h.update(b"|");
+        h.update(ev.actor_id.0.as_bytes());
+        h.update(b"|");
+        h.update(format!("{:?}", ev.action).as_bytes());
+        h.update(b"|");
+        h.update(format!("{:?}", ev.target_kind).as_bytes());
+        h.update(b"|");
+        h.update(ev.target_id.as_bytes());
+        h.update(b"|");
+        h.update(ev.timestamp.0.to_string().as_bytes());
+        h.update(b"|");
+        h.update(ev.details.as_deref().unwrap_or("").as_bytes());
+        let expected = hex::encode(h.finalize());
+        if stored_hash.is_empty() {
+            // SQLite-loaded events have no hash; skip verification for them.
+            prev = expected;
+        } else if *stored_hash != expected {
+            broken_at = Some(i);
+            break;
+        } else {
+            prev = expected;
+        }
+    }
+    Json(AuditVerifyDto {
+        valid: broken_at.is_none(),
+        length,
+        broken_at,
+    })
 }
 
 #[utoipa::path(get, path = "/usage", tag = "audit",
@@ -1222,7 +1392,17 @@ async fn get_passenger(State(state): State<AppState>, Path(id): Path<String>) ->
         .read()
         .expect("passengers rwlock poisoned");
     match passengers.get(&PassengerId(id)) {
-        Ok(p) => (StatusCode::OK, Json(PassengerDto::from(p))).into_response(),
+        Ok(p) => {
+            let etag = format!(r#""{}""#, p.version);
+            // ETag allows clients to use If-Match on subsequent PATCH/DELETE requests.
+            let mut resp = (StatusCode::OK, Json(PassengerDto::from(p))).into_response();
+            resp.headers_mut().insert(
+                axum::http::header::ETAG,
+                axum::http::HeaderValue::from_str(&etag)
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("\"0\"")),
+            );
+            resp
+        }
         Err(e) => err_response_owned(&e),
     }
 }
@@ -1237,7 +1417,16 @@ async fn get_resource(State(state): State<AppState>, Path(id): Path<String>) -> 
         .read()
         .expect("resources rwlock poisoned");
     match resources.get(&ResourceId(id)) {
-        Ok(r) => (StatusCode::OK, Json(ResourceDto::from(r))).into_response(),
+        Ok(r) => {
+            let etag = format!(r#""{}""#, r.version);
+            let mut resp = (StatusCode::OK, Json(ResourceDto::from(r))).into_response();
+            resp.headers_mut().insert(
+                axum::http::header::ETAG,
+                axum::http::HeaderValue::from_str(&etag)
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("\"0\"")),
+            );
+            resp
+        }
         Err(e) => err_response_owned(&e),
     }
 }
@@ -1353,19 +1542,19 @@ async fn reset_world(State(state): State<AppState>, AuthActor(actor_id): AuthAct
         list_resources, create_resource, get_resource,
         list_accessible_resources, change_resource_min_tier, soft_delete_resource,
         use_resource,
-        list_admin_events, list_usage_events,
+        list_admin_events, verify_audit_chain, list_usage_events,
         report_by_tier, report_top_resources, report_personal_history,
         reset_world,
     ),
     components(schemas(
-        TierDto, OutcomeDto,
+        TierDto, OutcomeDto, ErrorCode,
         CrewLeadDto, AddCrewLeadReq, ReplaceCrewLeadReq,
         PassengerDto, CreatePassengerReq, ChangeTierReq,
         ResourceDto, CreateResourceReq,
         UseResourceReq,
         UsageEventDto, AdminEventDto,
         TierCountsDto, TopResourceDto,
-        HealthReadyDto,
+        HealthReadyDto, AuditVerifyDto,
         ErrorBody,
     )),
     tags(

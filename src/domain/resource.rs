@@ -26,4 +26,7 @@ pub struct Resource {
     pub min_tier: Tier,
     // Soft-delete marker — same semantics as `Passenger::deleted_at`.
     pub deleted_at: Option<Timestamp>,
+    /// Optimistic concurrency version. Starts at 0, incremented on every
+    /// mutation. Reset to 0 on server restart (in-memory only).
+    pub version: u64,
 }

@@ -147,8 +147,8 @@ export function LiveServerPanel(): JSX.Element {
           <span className={`tag ${status === "online" ? "allowed" : "denied"}`} data-testid="server-status">
             {status.toUpperCase()}
           </span>
-          <button onClick={() => void ping()} data-testid="btn-recheck">Re-check</button>
-          <button onClick={() => void refresh()} disabled={status !== "online"} data-testid="btn-refresh">
+          <button onClick={() => void ping()} data-testid="btn-recheck" aria-label="Re-check server connection">Re-check</button>
+          <button onClick={() => void refresh()} disabled={status !== "online"} data-testid="btn-refresh" aria-label="Refresh all data from server">
             Refresh all
           </button>
           <button
@@ -168,7 +168,11 @@ export function LiveServerPanel(): JSX.Element {
           >
             Reset server state
           </button>
-          {flash && <span className="muted">→ {flash}</span>}
+      {flash && (
+        // aria-live="polite" announces flash messages to screen readers
+        // without interrupting the current reading context (WCAG 4.1.3).
+        <span className="muted" aria-live="polite" aria-atomic="true">→ {flash}</span>
+      )}
         </div>
 
         {status === "offline" && (
@@ -181,14 +185,19 @@ export function LiveServerPanel(): JSX.Element {
         {status === "online" && (
           <>
             <div className="row">
-              <label className="muted">Acting Crew Lead:</label>
-              <select value={actorId} onChange={(e) => {
-                setActorId(e.target.value);
-                // FIX: update bearer token when crew-lead selection changes.
-                // Clear any stale 401 banner so the new token gets a clean slate.
-                api.setToken(e.target.value);
-                setAuthError(false);
-              }}>
+              <label htmlFor="acting-crew-lead" className="muted">Acting Crew Lead:</label>
+              <select
+                id="acting-crew-lead"
+                value={actorId}
+                onChange={(e) => {
+                  setActorId(e.target.value);
+                  // FIX: update bearer token when crew-lead selection changes.
+                  // Clear any stale 401 banner so the new token gets a clean slate.
+                  api.setToken(e.target.value);
+                  setAuthError(false);
+                }}
+                aria-label="Select acting crew lead"
+              >
                 {state.crewLeads.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} ({c.id})
@@ -387,6 +396,7 @@ function PassengersSection({
               <td>
                 <select
                   value={p.tier}
+                  aria-label={`Change tier for ${p.name}`}
                   onChange={(e) => void changeTier(p.id, e.target.value as Tier)}
                 >
                   {TIERS.map((t) => (
@@ -395,27 +405,28 @@ function PassengersSection({
                     </option>
                   ))}
                 </select>
-                <button onClick={() => void remove(p.id)}>Delete</button>
+                <button onClick={() => void remove(p.id)} aria-label={`Delete passenger ${p.name}`}>Delete</button>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
       <div className="row">
-        <input placeholder="id" value={id} onChange={(e) => setId(e.target.value)} />
+        <input placeholder="id" value={id} onChange={(e) => setId(e.target.value)} aria-label="Passenger ID" />
         <input
           placeholder="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          aria-label="Passenger name"
         />
-        <select value={tier} onChange={(e) => setTier(e.target.value as Tier)}>
+        <select value={tier} onChange={(e) => setTier(e.target.value as Tier)} aria-label="Passenger tier">
           {TIERS.map((t) => (
             <option key={t} value={t}>
               {t}
             </option>
           ))}
         </select>
-        <button onClick={() => void create()} disabled={!id || !name} data-testid="btn-create-passenger">
+        <button onClick={() => void create()} disabled={!id || !name} data-testid="btn-create-passenger" aria-label="Create passenger">
           Create passenger
         </button>
       </div>
@@ -484,6 +495,7 @@ function ResourcesSection({
               <td>
                 <select
                   value={r.min_tier}
+                  aria-label={`Change min tier for ${r.name}`}
                   onChange={(e) => void changeMin(r.id, e.target.value as Tier)}
                 >
                   {TIERS.map((t) => (
@@ -492,32 +504,34 @@ function ResourcesSection({
                     </option>
                   ))}
                 </select>
-                <button onClick={() => void remove(r.id)}>Delete</button>
+                <button onClick={() => void remove(r.id)} aria-label={`Delete resource ${r.name}`}>Delete</button>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
       <div className="row">
-        <input placeholder="id" value={id} onChange={(e) => setId(e.target.value)} />
+        <input placeholder="id" value={id} onChange={(e) => setId(e.target.value)} aria-label="Resource ID" />
         <input
           placeholder="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          aria-label="Resource name"
         />
         <input
           placeholder="category"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
+          aria-label="Resource category"
         />
-        <select value={minTier} onChange={(e) => setMinTier(e.target.value as Tier)}>
+        <select value={minTier} onChange={(e) => setMinTier(e.target.value as Tier)} aria-label="Minimum tier">
           {TIERS.map((t) => (
             <option key={t} value={t}>
               {t}
             </option>
           ))}
         </select>
-        <button onClick={() => void create()} disabled={!id || !name}>
+        <button onClick={() => void create()} disabled={!id || !name} aria-label="Create resource">
           Create resource
         </button>
       </div>
@@ -564,22 +578,22 @@ function AccessSection({
     <>
       <h3>Access (POST /access)</h3>
       <div className="row">
-        <select value={validPid} onChange={(e) => setPid(e.target.value)}>
+        <select value={validPid} onChange={(e) => setPid(e.target.value)} aria-label="Select passenger">
           {passengers.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name} ({p.tier})
             </option>
           ))}
         </select>
-        <span className="muted">→</span>
-        <select value={validRid} onChange={(e) => setRid(e.target.value)}>
+        <span className="muted" aria-hidden="true">→</span>
+        <select value={validRid} onChange={(e) => setRid(e.target.value)} aria-label="Select resource">
           {resources.map((r) => (
             <option key={r.id} value={r.id}>
               {r.name} (min {r.min_tier})
             </option>
           ))}
         </select>
-        <button onClick={() => void attempt()} disabled={!validPid || !validRid} data-testid="btn-attempt-access">
+        <button onClick={() => void attempt()} disabled={!validPid || !validRid} data-testid="btn-attempt-access" aria-label="Attempt resource access">
           Attempt access
         </button>
       </div>
@@ -856,6 +870,7 @@ function AccessibleSection(): JSX.Element {
         <select
           value={tier}
           onChange={(e) => setTier(e.target.value as Tier)}
+          aria-label="Filter tier for accessible resources"
         >
           <option value="Silver">Silver</option>
           <option value="Gold">Gold</option>

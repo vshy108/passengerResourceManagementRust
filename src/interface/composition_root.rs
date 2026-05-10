@@ -33,11 +33,13 @@ use crate::infrastructure::system_clock::SystemClock;
 // set). Pattern: enum-as-strategy, per AGENTS.md §10 "when a plain enum
 // suffices" for avoiding trait-object towers.
 
-/// Unified usage-event sink/source. Dispatches to in-memory or `SQLite`.
+/// Unified usage-event sink/source. Dispatches to in-memory, `SQLite`, or `PostgreSQL`.
 pub enum UsageSink {
     InMemory(InMemoryUsageEventSink),
     #[cfg(feature = "http")]
     Sqlite(SqliteUsageEventSink),
+    #[cfg(feature = "postgres")]
+    Pg(crate::infrastructure::PgUsageEventSink),
 }
 
 impl UsageEventSink for UsageSink {
@@ -46,6 +48,8 @@ impl UsageEventSink for UsageSink {
             Self::InMemory(s) => s.append(event),
             #[cfg(feature = "http")]
             Self::Sqlite(s) => s.append(event),
+            #[cfg(feature = "postgres")]
+            Self::Pg(s) => s.append(event),
         }
     }
 }
@@ -56,17 +60,21 @@ impl UsageEventSource for UsageSink {
             Self::InMemory(s) => s.list(),
             #[cfg(feature = "http")]
             Self::Sqlite(s) => s.list(),
+            #[cfg(feature = "postgres")]
+            Self::Pg(s) => s.list(),
         }
     }
 }
 
 /// Unified admin-event sink. Cloneable so multiple services share one
-/// buffer. Dispatches to in-memory or `SQLite`.
+/// buffer. Dispatches to in-memory, `SQLite`, or `PostgreSQL`.
 #[derive(Clone)]
 pub enum AuditSink {
     InMemory(InMemoryAdminEventSink),
     #[cfg(feature = "http")]
     Sqlite(SqliteAdminEventSink),
+    #[cfg(feature = "postgres")]
+    Pg(crate::infrastructure::PgAdminEventSink),
 }
 
 impl AuditSink {
@@ -77,6 +85,22 @@ impl AuditSink {
             Self::InMemory(s) => s.snapshot(),
             #[cfg(feature = "http")]
             Self::Sqlite(s) => s.snapshot(),
+            #[cfg(feature = "postgres")]
+            Self::Pg(s) => s.snapshot(),
+        }
+    }
+
+    /// All admin events paired with their hash-chain digests. Events loaded
+    /// from the `SQLite` adapter do not carry hashes (empty string), because
+    /// the hash chain is recomputed in memory on each server run.
+    #[must_use]
+    pub fn snapshot_with_hashes(&self) -> Vec<(AdminEvent, String)> {
+        match self {
+            Self::InMemory(s) => s.snapshot_with_hashes(),
+            #[cfg(feature = "http")]
+            Self::Sqlite(s) => s.snapshot().into_iter().map(|ev| (ev, String::new())).collect(),
+            #[cfg(feature = "postgres")]
+            Self::Pg(s) => s.snapshot_with_hashes(),
         }
     }
 }
@@ -87,6 +111,8 @@ impl AdminEventSink for AuditSink {
             Self::InMemory(s) => s.append(event),
             #[cfg(feature = "http")]
             Self::Sqlite(s) => s.append(event),
+            #[cfg(feature = "postgres")]
+            Self::Pg(s) => s.append(event),
         }
     }
 }
@@ -344,16 +370,16 @@ impl std::fmt::Display for BuildError {
     }
 }
 
-/// Build a world backed by PostgreSQL at `pg_url`.
+/// Build a world backed by `PostgreSQL` at `pg_url`.
 ///
 /// On first run (empty `crew_leads` table): seeds the demo world and persists
-/// all entities to PostgreSQL. On subsequent runs: restores entity state from
+/// all entities to `PostgreSQL`. On subsequent runs: restores entity state from
 /// the database. Usage events and admin events are loaded from prior runs.
 ///
 /// The returned `World` uses **in-memory sinks** for events emitted during the
 /// current process lifetime. `flush_to_pg()` in Phase 4 will replace this with
 /// per-request async SQL; for now the same `sync_all` flush pattern used for
-/// SQLite is available on `PgEntityStore`.
+/// `SQLite` is available on `PgEntityStore`.
 ///
 /// # Errors
 /// - `BuildError::Postgres` if any database operation fails.
@@ -367,16 +393,20 @@ pub async fn build_world_with_postgres(pg_url: &str) -> Result<World, BuildError
         .await
         .map_err(BuildError::Postgres)?;
 
-    let store = PgEntityStore::new(pool);
+    let store = PgEntityStore::new(pool.clone());
     store.migrate().await.map_err(BuildError::Postgres)?;
-
-    // In-memory sinks for this process lifetime.
-    let audit_sink = AuditSink::InMemory(InMemoryAdminEventSink::new());
-    let usage_sink = UsageSink::InMemory(InMemoryUsageEventSink::new());
 
     let is_first = store.is_first_run().await.map_err(BuildError::Postgres)?;
     if is_first {
         // First run: seed demo world, then persist entities to PG.
+        // Use PG write-through sinks so new events in this session are
+        // persisted per-request, not just on batch sync.
+        let admin_events_existing: Vec<crate::domain::admin_event::AdminEvent> = vec![];
+        let usage_events_existing: Vec<crate::domain::usage_event::UsageEvent> = vec![];
+        let pg_admin_sink = crate::infrastructure::PgAdminEventSink::new(&pool, admin_events_existing);
+        let pg_usage_sink = crate::infrastructure::PgUsageEventSink::new(&pool, usage_events_existing);
+        let audit_sink = AuditSink::Pg(pg_admin_sink);
+        let usage_sink = UsageSink::Pg(pg_usage_sink);
         let mut world = build_world(audit_sink, usage_sink).map_err(BuildError::Domain)?;
         store
             .sync_all(
@@ -388,16 +418,13 @@ pub async fn build_world_with_postgres(pg_url: &str) -> Result<World, BuildError
             )
             .await
             .map_err(BuildError::Postgres)?;
-        // entity_store = None: PG entity flushes happen via the store value
-        // held by the caller (composition root). Phase 4 embeds PgEntityStore
-        // directly in World so flush_to_db() becomes an async method.
         #[cfg(feature = "http")]
         {
             world.entity_store = None;
         }
         Ok(world)
     } else {
-        // Subsequent run: restore from PG.
+        // Subsequent run: restore from PG, wire PG write-through sinks.
         let leads = store
             .load_crew_leads()
             .await
@@ -417,21 +444,13 @@ pub async fn build_world_with_postgres(pg_url: &str) -> Result<World, BuildError
             .await
             .map_err(BuildError::Postgres)?;
 
-        // FIX: build the sinks WITH historical events BEFORE cloning into
-        // services. Because InMemoryAdminEventSink is Arc<Mutex<...>>-backed,
-        // all clones share the same buffer — services and World::audit_sink
-        // therefore see both historical events AND new events from this run.
-        let mut admin_sink = InMemoryAdminEventSink::new();
-        for ev in admin_events {
-            admin_sink.append(ev);
-        }
-        let audit_sink_pg = AuditSink::InMemory(admin_sink);
-
-        let mut usage_sink_inner = InMemoryUsageEventSink::new();
-        for ev in usage_events {
-            usage_sink_inner.append(ev);
-        }
-        let usage_sink_pg = UsageSink::InMemory(usage_sink_inner);
+        // FIX: Use PG write-through sinks so NEW events during this session
+        // are persisted per-request. Historical events are pre-loaded into the
+        // in-memory buffer inside each sink (so snapshot() returns them too).
+        let pg_admin_sink = crate::infrastructure::PgAdminEventSink::new(&pool, admin_events);
+        let pg_usage_sink = crate::infrastructure::PgUsageEventSink::new(&pool, usage_events);
+        let audit_sink_pg = AuditSink::Pg(pg_admin_sink);
+        let usage_sink_pg = UsageSink::Pg(pg_usage_sink);
 
         let crew_leads = CrewLeadService::restore(leads)
             .map_err(BuildError::Domain)?

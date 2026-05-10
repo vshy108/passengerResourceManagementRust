@@ -478,6 +478,8 @@ impl SqliteEntityStore {
                 name,
                 tier: tier_from_str(&tier_s)?,
                 deleted_at: del.map(crate::domain::timestamp::Timestamp),
+                // FIX: version is in-memory only (not persisted); restore to 0 on load.
+                version: 0,
             };
             if p.deleted_at.is_some() {
                 deleted.push(p);
@@ -524,6 +526,8 @@ impl SqliteEntityStore {
                 category,
                 min_tier: tier_from_str(&min_s)?,
                 deleted_at: del.map(crate::domain::timestamp::Timestamp),
+                // FIX: version is in-memory only (not persisted); restore to 0 on load.
+                version: 0,
             };
             if r.deleted_at.is_some() {
                 deleted.push(r);

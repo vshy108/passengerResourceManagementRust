@@ -130,6 +130,9 @@ pub struct PassengerDto {
     pub name: String,
     pub tier: TierDto,
     pub deleted_at: Option<i64>,
+    /// Optimistic concurrency version. Use as the `If-Match: "<version>"` header
+    /// value on PATCH/DELETE requests to prevent lost-update races.
+    pub version: u64,
 }
 
 impl From<&Passenger> for PassengerDto {
@@ -144,6 +147,7 @@ impl From<&Passenger> for PassengerDto {
             // leaves `None` unchanged. Here we extract the inner i64
             // from `Timestamp` for the wire form.
             deleted_at: p.deleted_at.map(|t| t.0),
+            version: p.version,
         }
     }
 }
@@ -192,6 +196,9 @@ pub struct ResourceDto {
     pub category: String,
     pub min_tier: TierDto,
     pub deleted_at: Option<i64>,
+    /// Optimistic concurrency version. Use as the `If-Match: "<version>"` header
+    /// value on PATCH/DELETE requests to prevent lost-update races.
+    pub version: u64,
 }
 
 impl From<&Resource> for ResourceDto {
@@ -202,6 +209,7 @@ impl From<&Resource> for ResourceDto {
             category: r.category.clone(),
             min_tier: r.min_tier.into(),
             deleted_at: r.deleted_at.map(|t| t.0),
+            version: r.version,
         }
     }
 }
@@ -316,6 +324,10 @@ pub struct AdminEventDto {
     pub target_id: String,
     pub timestamp: i64,
     pub details: Option<String>,
+    /// SHA-256 hex digest of this event linked to the previous event's hash.
+    /// Empty string when the event was loaded from a persistence store that
+    /// does not maintain the in-memory hash chain (e.g. `SQLite` adapter).
+    pub event_hash: String,
 }
 
 impl From<&AdminEvent> for AdminEventDto {
@@ -328,6 +340,7 @@ impl From<&AdminEvent> for AdminEventDto {
             target_id: e.target_id.clone(),
             timestamp: e.timestamp.0,
             details: e.details.clone(),
+            event_hash: String::new(),
         }
     }
 }
@@ -414,6 +427,20 @@ pub struct AccessibleQuery {
     pub tier: TierDto,
 }
 
+/// Query parameter for list endpoints to include soft-deleted records.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct SoftDeleteQuery {
+    pub include_deleted: Option<bool>,
+}
+
+impl SoftDeleteQuery {
+    /// Returns `true` when `?include_deleted=true` is present.
+    #[must_use]
+    pub fn include_deleted(&self) -> bool {
+        self.include_deleted.unwrap_or(false)
+    }
+}
+
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AddCrewLeadReq {
@@ -422,10 +449,51 @@ pub struct AddCrewLeadReq {
 
 // ---------- error envelope ----------------------------------------------
 
+/// Machine-readable error code returned in every error response body.
+/// Exhaustive TypeScript union generated from this enum via `/openapi.json`.
+#[derive(Debug, Clone, Copy, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "PascalCase")]
+pub enum ErrorCode {
+    UnauthorizedActor,
+    AccessDenied,
+    PassengerNotFound,
+    PassengerAlreadyExists,
+    ResourceNotFound,
+    ResourceAlreadyExists,
+    CrewLeadNotFound,
+    CrewLeadAlreadyExists,
+    CrewLeadLimitReached,
+    CrewLeadMinimumBreached,
+    CrewLeadBootstrapInvalid,
+    /// HTTP-layer input validation failure (boundary guard, not a domain error).
+    InvalidInput,
+    /// Bearer token missing or unknown — HTTP 401.
+    Unauthorized,
+    /// `If-Match` version does not match current entity version — HTTP 412.
+    VersionConflict,
+    /// Unexpected server-side error (e.g. poisoned mutex).
+    InternalError,
+    /// Database unreachable (reported by `GET /health/ready`).
+    DatabaseUnreachable,
+}
+
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ErrorBody {
     pub error: String,
-    pub code: String,
+    pub code: ErrorCode,
+}
+
+// ---------- audit verify ------------------------------------------------
+
+/// Response body for `GET /audit/verify`.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct AuditVerifyDto {
+    /// `true` when the entire hash chain is intact.
+    pub valid: bool,
+    /// Total number of events in the chain.
+    pub length: usize,
+    /// Index of the first broken link, if any.
+    pub broken_at: Option<usize>,
 }
 
 // ---------- health ready ------------------------------------------------

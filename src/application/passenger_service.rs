@@ -92,6 +92,7 @@ impl<C: Clock> PassengerService<C> {
             name,
             tier,
             deleted_at: None,
+            version: 0,
         };
         // Push a clone so we can also return `p` to the caller.
         self.active.push(p.clone());
@@ -125,6 +126,8 @@ impl<C: Clock> PassengerService<C> {
             .find(|p| p.id == *id)
             .ok_or(DomainError::PassengerNotFound)?;
         slot.tier = new_tier;
+        // Increment version so concurrent If-Match checks on the old version fail.
+        slot.version += 1;
         self.emit(
             &actor_id,
             AdminAction::PassengerTierChanged,
@@ -154,6 +157,8 @@ impl<C: Clock> PassengerService<C> {
         // for a small in-memory roster.
         let mut p = self.active.remove(pos);
         p.deleted_at = Some(self.clock.now());
+        // Increment version so any in-flight If-Match request with the old version fails.
+        p.version += 1;
         self.deleted.push(p);
         self.emit(&actor_id, AdminAction::PassengerDeleted, id.0.clone(), None);
         Ok(())

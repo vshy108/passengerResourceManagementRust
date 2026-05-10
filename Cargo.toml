@@ -10,7 +10,7 @@ publish = false
 default = []
 # Optional HTTP adapter. Pulls in axum/tokio/serde and enables the
 # `serve` binary. The core library and tests do not depend on this.
-http = ["dep:axum", "dep:tokio", "dep:tower", "dep:tower-http", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tracing-subscriber", "dep:clap", "dep:utoipa", "dep:rusqlite", "dep:tower_governor", "dep:subtle"]
+http = ["dep:axum", "dep:tokio", "dep:tower", "dep:tower-http", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tracing-subscriber", "dep:clap", "dep:utoipa", "dep:rusqlite", "dep:tower_governor", "dep:subtle", "dep:sha2", "dep:hex"]
 # Optional PostgreSQL backend. Adds sqlx + the PgEntityStore adapter.
 # Requires PRMS_PG_URL to be set at runtime; compile-time DB not needed
 # because we use `sqlx::query()` (no `query!` macros).
@@ -41,6 +41,10 @@ subtle = { version = "2", optional = true }
 # (no system-OpenSSL dep), required even when the server uses plain TCP because
 # sqlx links the rustls crate regardless of whether TLS is negotiated.
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "tls-rustls"], optional = true }
+# SHA-256 hashing for the tamper-evident audit log hash chain.
+sha2 = { version = "0.10", optional = true }
+# Hex encoding for SHA-256 digests stored/compared as strings.
+hex = { version = "0.4", optional = true }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

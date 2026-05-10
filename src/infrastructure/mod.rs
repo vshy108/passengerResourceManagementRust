@@ -11,5 +11,9 @@ pub mod system_clock;
 // Re-export the entity store so composition_root.rs can import it cleanly.
 #[cfg(feature = "postgres")]
 pub use pg_store::PgEntityStore;
+#[cfg(feature = "postgres")]
+pub use pg_store::PgAdminEventSink;
+#[cfg(feature = "postgres")]
+pub use pg_store::PgUsageEventSink;
 #[cfg(feature = "http")]
 pub use sqlite_event_store::SqliteEntityStore;

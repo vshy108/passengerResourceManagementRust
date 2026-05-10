@@ -73,4 +73,10 @@ pub enum DomainError {
     /// rank. See TP-R2.
     #[error("access denied")]
     AccessDenied,
+
+    /// Raised by HTTP handlers when a client-supplied `If-Match` version
+    /// does not match the entity's current version — another mutation
+    /// occurred since the client last read the record.
+    #[error("version conflict — record was modified by another request")]
+    VersionConflict,
 }

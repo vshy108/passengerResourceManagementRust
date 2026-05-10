@@ -26,4 +26,8 @@ pub struct Passenger {
     //   - None    -> no value
     // The compiler forces you to handle both cases (no NullPointerException).
     pub deleted_at: Option<Timestamp>,
+    /// Optimistic concurrency version. Starts at 0, incremented on every
+    /// mutation so callers can use `If-Match: "<version>"` to prevent
+    /// lost-update races. Reset to 0 on server restart (in-memory only).
+    pub version: u64,
 }
