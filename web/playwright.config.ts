@@ -37,5 +37,11 @@ export default defineConfig({
     url: "http://localhost:5173",
     reuseExistingServer: true,
     timeout: 30_000,
+    // FIX: supply a demo token so the React app auto-logs in and skips the
+    // login page entirely in e2e mode (VITE_API_TOKEN is read at module init
+    // by api.ts and picked up by AuthContext as the initial token).
+    env: {
+      VITE_API_TOKEN: "cl-aria",
+    },
   },
 });

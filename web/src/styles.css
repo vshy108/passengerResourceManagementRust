@@ -23,18 +23,38 @@ body {
   color: var(--text);
 }
 
+/* ── App shell header ─────────────────────────────────────────────────── */
+
 header {
-  padding: 16px 24px;
+  padding: 10px 24px;
   border-bottom: 1px solid var(--line);
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: var(--panel);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 header h1 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 header p {
@@ -43,11 +63,84 @@ header p {
   font-size: 13px;
 }
 
+/* ── Navigation links ─────────────────────────────────────────────────── */
+
+.nav-links {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.nav-link {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.nav-link.active {
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.12);
+}
+
+.header-token {
+  font-size: 12px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-logout {
+  color: var(--red);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.btn-logout:hover:not(:disabled) {
+  border-color: var(--red);
+  background: rgba(248, 81, 73, 0.1);
+}
+
+/* ── Breadcrumb ───────────────────────────────────────────────────────── */
+
+.breadcrumb-bar {
+  padding: 6px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.breadcrumb a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.breadcrumb-sep {
+  color: var(--muted);
+}
+
+/* ── Main content area ────────────────────────────────────────────────── */
+
 main {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-  gap: 16px;
-  padding: 16px 24px 32px;
+  padding: 24px 24px 32px;
 }
 
 .panel {
@@ -192,4 +285,125 @@ footer {
   color: var(--muted);
   font-size: 12px;
   border-top: 1px solid var(--line);
+}
+
+/* ── Page content ─────────────────────────────────────────────────────── */
+
+.page {
+  max-width: 960px;
+}
+
+.page h2 {
+  margin: 0 0 20px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.page h3 {
+  margin: 20px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* ── Dashboard stats cards ────────────────────────────────────────────── */
+
+.stats-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 24px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--text);
+  min-width: 100px;
+  transition: border-color 0.15s;
+}
+
+.stat-card:hover {
+  border-color: var(--accent);
+}
+
+.stat-num {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* ── Login page ───────────────────────────────────────────────────────── */
+
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.login-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 40px 48px;
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.login-subtitle {
+  margin: 0;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.login-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.login-btn {
+  margin-top: 4px;
+  padding: 8px 16px;
+  font-weight: 600;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.login-btn:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.12);
+}
+
+.login-hint {
+  font-size: 12px;
+  margin-top: 8px;
 }

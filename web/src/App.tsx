@@ -1,19 +1,29 @@
-import { LiveServerPanel } from "./components/LiveServerPanel";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { DataProvider } from "./contexts/DataContext";
+import { AppShell } from "./components/AppShell";
+import { LoginPage } from "./components/LoginPage";
+import { useHash } from "./hooks/useHash";
 
-// Root layout. All content is fetched from the Rust backend (axum server at localhost:8080).
+function AppInner(): JSX.Element {
+  const { token } = useAuth();
+  const hash = useHash();
+
+  // Show login when there is no token or the user explicitly navigated to /login.
+  if (!token || hash === "#/login") {
+    return <LoginPage />;
+  }
+
+  return (
+    <DataProvider>
+      <AppShell />
+    </DataProvider>
+  );
+}
+
 export function App(): JSX.Element {
   return (
-    <>
-      <header>
-        <h1>Spaceship X26 — Passenger Resource Management</h1>
-      </header>
-      <main>
-        <LiveServerPanel />
-      </main>
-      <footer>
-        See <code>AGENTS.md</code> and <code>specs/</code> for the canonical rules. Tests in
-        the Rust crate keep this implementation honest.
-      </footer>
-    </>
+    <AuthProvider>
+      <AppInner />
+    </AuthProvider>
   );
 }
