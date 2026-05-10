@@ -25,6 +25,8 @@ use clap::Parser;
 // Importing from the LIBRARY crate by its package name (replace
 // hyphens with underscores). This binary is separate from `lib.rs` —
 // it links against it like any external consumer.
+#[cfg(feature = "postgres")]
+use passenger_resource_management::interface::composition_root::build_world_with_postgres;
 use passenger_resource_management::interface::composition_root::{
     build_demo_world, build_world_with_sqlite,
 };
@@ -54,6 +56,12 @@ struct Args {
     // `default_value_t = false` makes this opt-in rather than opt-out.
     #[arg(long, env = "PRMS_ENABLE_RESET", default_value_t = false)]
     enable_reset: bool,
+
+    /// `PostgreSQL` connection URL. When set, entities are stored in `PostgreSQL`
+    /// instead of `SQLite` and the in-memory sinks flush to PG on each mutation.
+    /// Takes priority over `--db-path`. Format: `postgres://user:pass@host/db`.
+    #[arg(long, env = "PRMS_PG_URL")]
+    pg_url: Option<String>,
 
     /// Path to the `SQLite` database file. When unset, state is in-memory
     /// only and resets on restart. Set to a persistent path in production
@@ -94,7 +102,7 @@ struct Args {
 // without panicking — cleaner than `process::exit`.
 #[tokio::main]
 #[allow(clippy::too_many_lines)] // main() is setup-heavy by nature — extracting helpers would
-                                  // just scatter one logical flow across many small functions.
+// just scatter one logical flow across many small functions.
 async fn main() -> ExitCode {
     // `Args::parse()` (from the Parser derive) reads argv + env and
     // exits with a friendly error if anything is malformed.
@@ -115,9 +123,7 @@ async fn main() -> ExitCode {
                 .init();
         }
         _ => {
-            tracing_subscriber::fmt()
-                .with_env_filter(filter)
-                .init();
+            tracing_subscriber::fmt().with_env_filter(filter).init();
         }
     }
 
@@ -154,7 +160,29 @@ async fn main() -> ExitCode {
         }
     };
 
-    let world = if let Some(path) = args.db_path.as_deref() {
+    // Priority: PRMS_PG_URL → PRMS_DB_PATH → in-memory demo world.
+    let world = if let Some(pg_url) = args.pg_url.as_deref() {
+        #[cfg(not(feature = "postgres"))]
+        {
+            eprintln!(
+                "PRMS_PG_URL is set but this binary was compiled without the \
+                       `postgres` feature. Rebuild with `--features postgres`."
+            );
+            let _ = pg_url; // suppress unused-variable lint
+            return ExitCode::from(1);
+        }
+        #[cfg(feature = "postgres")]
+        {
+            tracing::info!("PostgreSQL event store: {pg_url}");
+            match build_world_with_postgres(pg_url).await {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("failed to connect to PostgreSQL at {pg_url:?}: {e}");
+                    return ExitCode::from(1);
+                }
+            }
+        }
+    } else if let Some(path) = args.db_path.as_deref() {
         tracing::info!("SQLite event store: {path}");
         match build_world_with_sqlite(path) {
             Ok(w) => w,

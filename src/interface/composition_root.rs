@@ -15,9 +15,9 @@ use crate::domain::passenger::PassengerId;
 use crate::domain::resource::ResourceId;
 use crate::domain::tier::Tier;
 use crate::domain::usage_event::UsageEvent;
-use crate::infrastructure::fake_clock::FakeClock;
 #[cfg(feature = "http")]
-use crate::infrastructure::system_clock::SystemClock;
+use crate::infrastructure::SqliteEntityStore;
+use crate::infrastructure::fake_clock::FakeClock;
 use crate::infrastructure::in_memory_admin_event_sink::InMemoryAdminEventSink;
 use crate::infrastructure::in_memory_usage_event_sink::InMemoryUsageEventSink;
 #[cfg(feature = "http")]
@@ -25,7 +25,7 @@ use crate::infrastructure::sqlite_event_store::{
     SqliteAdminEventSink, SqliteUsageEventSink, open_db,
 };
 #[cfg(feature = "http")]
-use crate::infrastructure::SqliteEntityStore;
+use crate::infrastructure::system_clock::SystemClock;
 
 // ---------- sink enums --------------------------------------------------
 // These enums dispatch between the in-memory adapters (used in tests and
@@ -184,12 +184,10 @@ pub fn build_world_with_sqlite(db_path: &str) -> Result<World, BuildError> {
     let admin_conn = open_db(db_path).map_err(BuildError::Sqlite)?;
     let entity_conn = open_db(db_path).map_err(BuildError::Sqlite)?;
 
-    let audit_sink = AuditSink::Sqlite(
-        SqliteAdminEventSink::open(admin_conn).map_err(BuildError::Sqlite)?,
-    );
-    let usage_sink = UsageSink::Sqlite(
-        SqliteUsageEventSink::open(usage_conn).map_err(BuildError::Sqlite)?,
-    );
+    let audit_sink =
+        AuditSink::Sqlite(SqliteAdminEventSink::open(admin_conn).map_err(BuildError::Sqlite)?);
+    let usage_sink =
+        UsageSink::Sqlite(SqliteUsageEventSink::open(usage_conn).map_err(BuildError::Sqlite)?);
     let entity_store = SqliteEntityStore::new(entity_conn);
 
     if entity_store.is_first_run() {
@@ -324,12 +322,14 @@ fn build_world(audit_sink: AuditSink, usage_sink: UsageSink) -> Result<World, Do
     })
 }
 
-/// Error from [`build_world_with_sqlite`].
+/// Error from [`build_world_with_sqlite`] or [`build_world_with_postgres`].
 #[cfg(feature = "http")]
 #[derive(Debug)]
 pub enum BuildError {
     Domain(DomainError),
     Sqlite(rusqlite::Error),
+    #[cfg(feature = "postgres")]
+    Postgres(sqlx::Error),
 }
 
 #[cfg(feature = "http")]
@@ -338,6 +338,123 @@ impl std::fmt::Display for BuildError {
         match self {
             Self::Domain(e) => write!(f, "domain error: {e}"),
             Self::Sqlite(e) => write!(f, "sqlite error: {e}"),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(e) => write!(f, "postgres error: {e}"),
         }
+    }
+}
+
+/// Build a world backed by PostgreSQL at `pg_url`.
+///
+/// On first run (empty `crew_leads` table): seeds the demo world and persists
+/// all entities to PostgreSQL. On subsequent runs: restores entity state from
+/// the database. Usage events and admin events are loaded from prior runs.
+///
+/// The returned `World` uses **in-memory sinks** for events emitted during the
+/// current process lifetime. `flush_to_pg()` in Phase 4 will replace this with
+/// per-request async SQL; for now the same `sync_all` flush pattern used for
+/// SQLite is available on `PgEntityStore`.
+///
+/// # Errors
+/// - `BuildError::Postgres` if any database operation fails.
+/// - `BuildError::Domain` if service invariants are violated.
+#[cfg(feature = "postgres")]
+pub async fn build_world_with_postgres(pg_url: &str) -> Result<World, BuildError> {
+    use crate::infrastructure::PgEntityStore;
+    use sqlx::PgPool;
+
+    let pool = PgPool::connect(pg_url)
+        .await
+        .map_err(BuildError::Postgres)?;
+
+    let store = PgEntityStore::new(pool);
+    store.migrate().await.map_err(BuildError::Postgres)?;
+
+    // In-memory sinks for this process lifetime.
+    let audit_sink = AuditSink::InMemory(InMemoryAdminEventSink::new());
+    let usage_sink = UsageSink::InMemory(InMemoryUsageEventSink::new());
+
+    let is_first = store.is_first_run().await.map_err(BuildError::Postgres)?;
+    if is_first {
+        // First run: seed demo world, then persist entities to PG.
+        let mut world = build_world(audit_sink, usage_sink).map_err(BuildError::Domain)?;
+        store
+            .sync_all(
+                world.crew_leads.list(),
+                world.passengers.list(),
+                world.passengers.deleted(),
+                world.resources.list(),
+                world.resources.deleted(),
+            )
+            .await
+            .map_err(BuildError::Postgres)?;
+        // entity_store = None: PG entity flushes happen via the store value
+        // held by the caller (composition root). Phase 4 embeds PgEntityStore
+        // directly in World so flush_to_db() becomes an async method.
+        #[cfg(feature = "http")]
+        {
+            world.entity_store = None;
+        }
+        Ok(world)
+    } else {
+        // Subsequent run: restore from PG.
+        let leads = store
+            .load_crew_leads()
+            .await
+            .map_err(BuildError::Postgres)?;
+        let (active_pax, deleted_pax) = store
+            .load_passengers()
+            .await
+            .map_err(BuildError::Postgres)?;
+        let (active_res, deleted_res) =
+            store.load_resources().await.map_err(BuildError::Postgres)?;
+        let usage_events = store
+            .load_usage_events()
+            .await
+            .map_err(BuildError::Postgres)?;
+        let admin_events = store
+            .load_admin_events()
+            .await
+            .map_err(BuildError::Postgres)?;
+
+        // FIX: build the sinks WITH historical events BEFORE cloning into
+        // services. Because InMemoryAdminEventSink is Arc<Mutex<...>>-backed,
+        // all clones share the same buffer — services and World::audit_sink
+        // therefore see both historical events AND new events from this run.
+        let mut admin_sink = InMemoryAdminEventSink::new();
+        for ev in admin_events {
+            admin_sink.append(ev);
+        }
+        let audit_sink_pg = AuditSink::InMemory(admin_sink);
+
+        let mut usage_sink_inner = InMemoryUsageEventSink::new();
+        for ev in usage_events {
+            usage_sink_inner.append(ev);
+        }
+        let usage_sink_pg = UsageSink::InMemory(usage_sink_inner);
+
+        let crew_leads = CrewLeadService::restore(leads)
+            .map_err(BuildError::Domain)?
+            .with_future_audit(Box::new(SystemClock), Box::new(audit_sink_pg.clone()));
+
+        let passengers = PassengerService::new(FakeClock::starting_at_system_time())
+            .with_audit(Box::new(audit_sink_pg.clone()))
+            .with_preloaded(active_pax, deleted_pax);
+
+        let resources = ResourceService::new(FakeClock::starting_at_system_time())
+            .with_audit(Box::new(audit_sink_pg.clone()))
+            .with_preloaded(active_res, deleted_res);
+
+        let access = AccessService::new(FakeClock::starting_at_system_time(), usage_sink_pg);
+
+        Ok(World {
+            crew_leads,
+            passengers,
+            resources,
+            access,
+            audit_sink: audit_sink_pg,
+            #[cfg(feature = "http")]
+            entity_store: None,
+        })
     }
 }
