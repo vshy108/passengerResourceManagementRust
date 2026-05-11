@@ -459,7 +459,7 @@ fn parse_if_match(headers: &axum::http::HeaderMap) -> Option<u64> {
 /// # Panics
 /// Panics if any `RwLock` is poisoned or any `SQLite` write fails (a divergence
 /// between in-memory and persistent state is unrecoverable, so crashing is correct).
-async fn flush_to_db(state: &AppState) {
+fn flush_to_db(state: &AppState) {
     let Some(store) = &state.world.entity_store else {
         return;
     };
@@ -489,9 +489,7 @@ async fn flush_to_db(state: &AppState) {
     };
     // FIX: sync_all wraps all three entity tables in a single BEGIN IMMEDIATE /
     // COMMIT transaction so a crash mid-flush cannot produce split-brain state.
-    store
-        .sync_all(&leads, &active_pax, &deleted_pax, &active_res, &deleted_res)
-        .await;
+    store.sync_all(&leads, &active_pax, &deleted_pax, &active_res, &deleted_res);
 }
 
 /// Axum extractor that resolves an `Authorization: Bearer <token>` header
@@ -584,7 +582,7 @@ async fn health_ready(State(state): State<AppState>) -> Response {
     use crate::application::ports::UsageEventSource;
     // DB liveness check — entity_store is immutable after init, no lock needed.
     if let Some(store) = state.world.entity_store.as_ref()
-        && !store.ping_db().await
+        && !store.ping_db()
     {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -777,7 +775,7 @@ async fn replace_crew_lead(
     }; // write lock released before flush
     match result {
         Ok(()) => {
-            flush_to_db(&state).await;
+            flush_to_db(&state);
             tracing::info!(old_id = %old_id, new_id = %new_id_for_log, actor = %actor_id, "crew lead replaced");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -852,7 +850,7 @@ async fn create_passenger(
     }; // write lock released before flush
     match result {
         Ok(p) => {
-            flush_to_db(&state).await;
+            flush_to_db(&state);
             tracing::info!(passenger_id = %p.id.0, tier = ?p.tier, actor = %actor_id, "passenger created");
             let dto = PassengerDto::from(&p);
             let body = serde_json::to_vec(&dto).expect("PassengerDto serialization is infallible");
@@ -900,7 +898,7 @@ async fn change_passenger_tier(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state).await;
+            flush_to_db(&state);
             tracing::info!(passenger_id = %id, tier = ?req.tier, actor = %actor_id, "passenger tier changed");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -941,7 +939,7 @@ async fn soft_delete_passenger(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state).await;
+            flush_to_db(&state);
             tracing::info!(passenger_id = %id, actor = %actor_id, "passenger soft-deleted");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1021,7 +1019,7 @@ async fn create_resource(
     }; // write lock released before flush
     match result {
         Ok(r) => {
-            flush_to_db(&state).await;
+            flush_to_db(&state);
             tracing::info!(resource_id = %r.id.0, min_tier = ?r.min_tier, actor = %actor_id, "resource created");
             let dto = ResourceDto::from(&r);
             let body = serde_json::to_vec(&dto).expect("ResourceDto serialization is infallible");
@@ -1068,7 +1066,7 @@ async fn change_resource_min_tier(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state).await;
+            flush_to_db(&state);
             tracing::info!(resource_id = %id, min_tier = ?req.tier, actor = %actor_id, "resource min-tier changed");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1109,7 +1107,7 @@ async fn soft_delete_resource(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state).await;
+            flush_to_db(&state);
             tracing::info!(resource_id = %id, actor = %actor_id, "resource soft-deleted");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1353,7 +1351,7 @@ async fn add_crew_lead(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state).await;
+            flush_to_db(&state);
             tracing::info!(new_id = %new_id, actor = %actor_id, "crew lead added");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1382,7 +1380,7 @@ async fn remove_crew_lead(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state).await;
+            flush_to_db(&state);
             tracing::info!(removed_id = %id, actor = %actor_id, "crew lead removed");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1522,7 +1520,7 @@ async fn reset_world(State(state): State<AppState>, AuthActor(actor_id): AuthAct
         *aud = new_aud;
     } // all write locks released before flush
 
-    flush_to_db(&state).await;
+    flush_to_db(&state);
     StatusCode::NO_CONTENT.into_response()
 }
 

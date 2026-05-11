@@ -138,7 +138,7 @@ impl EntityStore {
     /// # Panics
     /// Panics if the configured store cannot persist the snapshot. Continuing
     /// after this point would let in-memory state diverge from durable state.
-    pub async fn sync_all(
+    pub fn sync_all(
         &self,
         leads: &[CrewLead],
         active_pax: &[crate::domain::passenger::Passenger],
@@ -151,20 +151,33 @@ impl EntityStore {
                 store.sync_all(leads, active_pax, deleted_pax, active_res, deleted_res);
             }
             #[cfg(feature = "postgres")]
-            Self::Pg(store) => store
-                .sync_all(leads, active_pax, deleted_pax, active_res, deleted_res)
-                .await
-                .expect("postgres entity sync_all failed"),
+            Self::Pg(store) => {
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(store.sync_all(
+                            leads,
+                            active_pax,
+                            deleted_pax,
+                            active_res,
+                            deleted_res,
+                        ))
+                        .expect("postgres entity sync_all failed");
+                });
+            }
         }
     }
 
     /// Return `true` if the configured entity store is reachable.
     #[must_use]
-    pub async fn ping_db(&self) -> bool {
+    pub fn ping_db(&self) -> bool {
         match self {
             Self::Sqlite(store) => store.ping_db(),
             #[cfg(feature = "postgres")]
-            Self::Pg(store) => store.ping().await.is_ok(),
+            Self::Pg(store) => tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(store.ping())
+                    .is_ok()
+            }),
         }
     }
 }
@@ -199,17 +212,15 @@ impl World {
     /// Panics if any `SQLite` write fails — a divergence between in-memory
     /// and persistent state is unrecoverable, so crashing is correct.
     #[cfg(feature = "http")]
-    pub async fn flush_to_db(&self) {
+    pub fn flush_to_db(&self) {
         if let Some(store) = &self.entity_store {
-            store
-                .sync_all(
-                    self.crew_leads.list(),
-                    self.passengers.list(),
-                    self.passengers.deleted(),
-                    self.resources.list(),
-                    self.resources.deleted(),
-                )
-                .await;
+            store.sync_all(
+                self.crew_leads.list(),
+                self.passengers.list(),
+                self.passengers.deleted(),
+                self.resources.list(),
+                self.resources.deleted(),
+            );
         }
     }
 
@@ -217,11 +228,8 @@ impl World {
     /// `None` if in-memory only. Used by `GET /health/ready` for DB liveness.
     #[cfg(feature = "http")]
     #[must_use]
-    pub async fn ping_db(&self) -> Option<bool> {
-        match &self.entity_store {
-            Some(store) => Some(store.ping_db().await),
-            None => None,
-        }
+    pub fn ping_db(&self) -> Option<bool> {
+        self.entity_store.as_ref().map(EntityStore::ping_db)
     }
 }
 
@@ -544,19 +552,19 @@ mod tests {
 
     // ── World::ping_db ────────────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn ping_db_returns_none_for_in_memory_world() {
+    #[test]
+    fn ping_db_returns_none_for_in_memory_world() {
         // build_demo_world() creates a World with entity_store: None
         // (no SQLite file path provided), so ping_db must return None.
         let world = build_demo_world().expect("build failed");
-        assert_eq!(world.ping_db().await, None);
+        assert_eq!(world.ping_db(), None);
     }
 
-    #[tokio::test]
-    async fn ping_db_returns_some_true_for_sqlite_world() {
+    #[test]
+    fn ping_db_returns_some_true_for_sqlite_world() {
         // An in-memory SQLite world has a live connection → ping returns Some(true).
         let world = build_world_with_sqlite(":memory:").expect("sqlite build failed");
-        assert_eq!(world.ping_db().await, Some(true));
+        assert_eq!(world.ping_db(), Some(true));
     }
 
     // ── BuildError::fmt (Display) ─────────────────────────────────────────────
