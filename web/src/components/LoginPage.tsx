@@ -13,9 +13,9 @@ export function LoginPage(): JSX.Element {
     if (!t) return;
     setChecking(true);
     setError(null);
-    // Temporarily apply the token so health() sends it.
+    // Temporarily apply the token so the authenticated check can validate it.
     api.setToken(t);
-    const h = await api.health();
+    const h = await api.authCheck();
     if (h.ok) {
       login(t);
       window.location.hash = "#/";

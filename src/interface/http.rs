@@ -56,11 +56,12 @@ use crate::domain::errors::DomainError;
 use crate::domain::passenger::PassengerId;
 use crate::domain::resource::ResourceId;
 use crate::domain::tier::Tier;
-use crate::infrastructure::SqliteEntityStore;
 use crate::infrastructure::fake_clock::FakeClock;
-use crate::interface::composition_root::{AuditSink, UsageSink, World, build_demo_world};
+use crate::interface::composition_root::{
+    AuditSink, EntityStore, UsageSink, World, build_demo_world,
+};
 use crate::interface::dto::{
-    AccessibleQuery, AddCrewLeadReq, AdminEventDto, AuditVerifyDto, ChangeTierReq,
+    AccessibleQuery, AddCrewLeadReq, AdminEventDto, AuditVerifyDto, AuthCheckDto, ChangeTierReq,
     CreatePassengerReq, CreateResourceReq, CrewLeadDto, ErrorBody, ErrorCode, HealthReadyDto,
     OutcomeDto, PaginationQuery, PassengerDto, ReplaceCrewLeadReq, ResourceDto, SoftDeleteQuery,
     TierCountsDto, TierDto, TopNQuery, TopResourceDto, UsageEventDto, UseResourceReq,
@@ -96,10 +97,10 @@ struct WorldShards {
     resources: RwLock<ResourceService<FakeClock>>,
     access: RwLock<AccessService<FakeClock, UsageSink>>,
     audit_sink: RwLock<AuditSink>,
-    /// Present when `PRMS_DB_PATH` is set. Not behind a lock because it is
+    /// Present when `PRMS_DB_PATH` or `PRMS_PG_URL` is set. Not behind a lock because it is
     /// immutable after construction (only `sync_all` is called on it, never
-    /// replaced). `SqliteEntityStore` is internally Mutex-protected.
-    entity_store: Option<SqliteEntityStore>,
+    /// replaced). Concrete stores handle their own connection/pool sharing.
+    entity_store: Option<EntityStore>,
 }
 
 /// Shared state held by every handler. `Clone` is cheap: all fields are
@@ -299,6 +300,7 @@ pub fn router_with(
 
     Router::new()
         .route("/health", get(health))
+        .route("/auth/check", get(auth_check))
         .route("/health/ready", get(health_ready))
         .route("/metrics", get(metrics))
         .route("/openapi.json", get(openapi_json))
@@ -457,7 +459,7 @@ fn parse_if_match(headers: &axum::http::HeaderMap) -> Option<u64> {
 /// # Panics
 /// Panics if any `RwLock` is poisoned or any `SQLite` write fails (a divergence
 /// between in-memory and persistent state is unrecoverable, so crashing is correct).
-fn flush_to_db(state: &AppState) {
+async fn flush_to_db(state: &AppState) {
     let Some(store) = &state.world.entity_store else {
         return;
     };
@@ -487,7 +489,9 @@ fn flush_to_db(state: &AppState) {
     };
     // FIX: sync_all wraps all three entity tables in a single BEGIN IMMEDIATE /
     // COMMIT transaction so a crash mid-flush cannot produce split-brain state.
-    store.sync_all(&leads, &active_pax, &deleted_pax, &active_res, &deleted_res);
+    store
+        .sync_all(&leads, &active_pax, &deleted_pax, &active_res, &deleted_res)
+        .await;
 }
 
 /// Axum extractor that resolves an `Authorization: Bearer <token>` header
@@ -562,6 +566,15 @@ async fn health() -> &'static str {
     "ok"
 }
 
+#[utoipa::path(get, path = "/auth/check", tag = "auth",
+    responses(
+        (status = 200, description = "Bearer token is valid", body = AuthCheckDto),
+        (status = 401, description = "Missing or invalid bearer token", body = ErrorBody),
+    ))]
+async fn auth_check(AuthActor(actor_id): AuthActor) -> Json<AuthCheckDto> {
+    Json(AuthCheckDto { actor_id })
+}
+
 #[utoipa::path(get, path = "/health/ready", tag = "system",
     responses(
         (status = 200, description = "System ready — entity counts included", body = HealthReadyDto),
@@ -570,11 +583,8 @@ async fn health() -> &'static str {
 async fn health_ready(State(state): State<AppState>) -> Response {
     use crate::application::ports::UsageEventSource;
     // DB liveness check — entity_store is immutable after init, no lock needed.
-    if let Some(false) = state
-        .world
-        .entity_store
-        .as_ref()
-        .map(SqliteEntityStore::ping_db)
+    if let Some(store) = state.world.entity_store.as_ref()
+        && !store.ping_db().await
     {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -767,7 +777,7 @@ async fn replace_crew_lead(
     }; // write lock released before flush
     match result {
         Ok(()) => {
-            flush_to_db(&state);
+            flush_to_db(&state).await;
             tracing::info!(old_id = %old_id, new_id = %new_id_for_log, actor = %actor_id, "crew lead replaced");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -842,7 +852,7 @@ async fn create_passenger(
     }; // write lock released before flush
     match result {
         Ok(p) => {
-            flush_to_db(&state);
+            flush_to_db(&state).await;
             tracing::info!(passenger_id = %p.id.0, tier = ?p.tier, actor = %actor_id, "passenger created");
             let dto = PassengerDto::from(&p);
             let body = serde_json::to_vec(&dto).expect("PassengerDto serialization is infallible");
@@ -890,7 +900,7 @@ async fn change_passenger_tier(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state);
+            flush_to_db(&state).await;
             tracing::info!(passenger_id = %id, tier = ?req.tier, actor = %actor_id, "passenger tier changed");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -931,7 +941,7 @@ async fn soft_delete_passenger(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state);
+            flush_to_db(&state).await;
             tracing::info!(passenger_id = %id, actor = %actor_id, "passenger soft-deleted");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1011,7 +1021,7 @@ async fn create_resource(
     }; // write lock released before flush
     match result {
         Ok(r) => {
-            flush_to_db(&state);
+            flush_to_db(&state).await;
             tracing::info!(resource_id = %r.id.0, min_tier = ?r.min_tier, actor = %actor_id, "resource created");
             let dto = ResourceDto::from(&r);
             let body = serde_json::to_vec(&dto).expect("ResourceDto serialization is infallible");
@@ -1058,7 +1068,7 @@ async fn change_resource_min_tier(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state);
+            flush_to_db(&state).await;
             tracing::info!(resource_id = %id, min_tier = ?req.tier, actor = %actor_id, "resource min-tier changed");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1099,7 +1109,7 @@ async fn soft_delete_resource(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state);
+            flush_to_db(&state).await;
             tracing::info!(resource_id = %id, actor = %actor_id, "resource soft-deleted");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1343,7 +1353,7 @@ async fn add_crew_lead(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state);
+            flush_to_db(&state).await;
             tracing::info!(new_id = %new_id, actor = %actor_id, "crew lead added");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1372,7 +1382,7 @@ async fn remove_crew_lead(
     };
     match result {
         Ok(()) => {
-            flush_to_db(&state);
+            flush_to_db(&state).await;
             tracing::info!(removed_id = %id, actor = %actor_id, "crew lead removed");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -1512,7 +1522,7 @@ async fn reset_world(State(state): State<AppState>, AuthActor(actor_id): AuthAct
         *aud = new_aud;
     } // all write locks released before flush
 
-    flush_to_db(&state);
+    flush_to_db(&state).await;
     StatusCode::NO_CONTENT.into_response()
 }
 
@@ -1533,7 +1543,7 @@ async fn reset_world(State(state): State<AppState>, AuthActor(actor_id): AuthAct
         description = "Spaceship X26 Passenger Resource Management System."
     ),
     paths(
-        health, health_ready,
+        health, auth_check, health_ready,
         list_crew_leads, add_crew_lead, replace_crew_lead, remove_crew_lead,
         list_passengers, create_passenger, get_passenger,
         change_passenger_tier, soft_delete_passenger,
@@ -1553,10 +1563,11 @@ async fn reset_world(State(state): State<AppState>, AuthActor(actor_id): AuthAct
         UsageEventDto, AdminEventDto,
         TierCountsDto, TopResourceDto,
         HealthReadyDto, AuditVerifyDto,
-        ErrorBody,
+        AuthCheckDto, ErrorBody,
     )),
     tags(
         (name = "system", description = "Health & admin"),
+        (name = "auth", description = "Authentication checks"),
         (name = "crew-leads", description = "Crew lead management"),
         (name = "passengers", description = "Passenger lifecycle"),
         (name = "resources", description = "Resource lifecycle"),

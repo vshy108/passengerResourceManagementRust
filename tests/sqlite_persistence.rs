@@ -22,8 +22,8 @@ use passenger_resource_management::domain::tier::Tier;
 use passenger_resource_management::interface::composition_root::build_world_with_sqlite;
 
 #[cfg(feature = "http")]
-#[test]
-fn entity_state_survives_restart_via_sqlite() {
+#[tokio::test]
+async fn entity_state_survives_restart_via_sqlite() {
     // Write a temporary file so "run 1" and "run 2" share the same data.
     let dir = std::env::temp_dir();
     let db_path = dir.join(format!(
@@ -61,7 +61,7 @@ fn entity_state_survives_restart_via_sqlite() {
         // The World::flush_to_db() is called inside the HTTP handlers,
         // but here we are in a unit-style test driving the World directly.
         // Call flush manually to simulate what the handler would do.
-        world.flush_to_db();
+        world.flush_to_db().await;
     } // `world` dropped; simulated restart.
 
     // ── Run 2: subsequent boot — restores state, no re-seeding ─────────────

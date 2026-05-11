@@ -15,6 +15,8 @@ use crate::domain::passenger::PassengerId;
 use crate::domain::resource::ResourceId;
 use crate::domain::tier::Tier;
 use crate::domain::usage_event::UsageEvent;
+#[cfg(feature = "postgres")]
+use crate::infrastructure::PgEntityStore;
 #[cfg(feature = "http")]
 use crate::infrastructure::SqliteEntityStore;
 use crate::infrastructure::fake_clock::FakeClock;
@@ -121,6 +123,52 @@ impl AdminEventSink for AuditSink {
     }
 }
 
+/// Entity snapshot store configured at the composition root.
+#[cfg(feature = "http")]
+pub enum EntityStore {
+    Sqlite(SqliteEntityStore),
+    #[cfg(feature = "postgres")]
+    Pg(PgEntityStore),
+}
+
+#[cfg(feature = "http")]
+impl EntityStore {
+    /// Persist a complete entity snapshot.
+    ///
+    /// # Panics
+    /// Panics if the configured store cannot persist the snapshot. Continuing
+    /// after this point would let in-memory state diverge from durable state.
+    pub async fn sync_all(
+        &self,
+        leads: &[CrewLead],
+        active_pax: &[crate::domain::passenger::Passenger],
+        deleted_pax: &[crate::domain::passenger::Passenger],
+        active_res: &[crate::domain::resource::Resource],
+        deleted_res: &[crate::domain::resource::Resource],
+    ) {
+        match self {
+            Self::Sqlite(store) => {
+                store.sync_all(leads, active_pax, deleted_pax, active_res, deleted_res);
+            }
+            #[cfg(feature = "postgres")]
+            Self::Pg(store) => store
+                .sync_all(leads, active_pax, deleted_pax, active_res, deleted_res)
+                .await
+                .expect("postgres entity sync_all failed"),
+        }
+    }
+
+    /// Return `true` if the configured entity store is reachable.
+    #[must_use]
+    pub async fn ping_db(&self) -> bool {
+        match self {
+            Self::Sqlite(store) => store.ping_db(),
+            #[cfg(feature = "postgres")]
+            Self::Pg(store) => store.ping().await.is_ok(),
+        }
+    }
+}
+
 // ---------- World -------------------------------------------------------
 
 /// In-process state owned by exactly one HTTP server. Held inside a
@@ -137,33 +185,31 @@ pub struct World {
     /// Clone-able handle on the same shared admin-event buffer the
     /// services write to — exposed so reporting endpoints can read it.
     pub audit_sink: AuditSink,
-    /// Present when `PRMS_DB_PATH` is set. HTTP handlers call
+    /// Present when `PRMS_DB_PATH` or `PRMS_PG_URL` is set. HTTP handlers call
     /// `flush_to_db()` after each entity mutation to persist state.
     #[cfg(feature = "http")]
-    pub entity_store: Option<SqliteEntityStore>,
+    pub entity_store: Option<EntityStore>,
 }
 
 impl World {
-    /// Flush all entity state to `SQLite`. No-op when `entity_store` is `None`.
+    /// Flush all entity state to the configured entity store. No-op when
+    /// `entity_store` is `None`.
     ///
     /// # Panics
     /// Panics if any `SQLite` write fails — a divergence between in-memory
     /// and persistent state is unrecoverable, so crashing is correct.
     #[cfg(feature = "http")]
-    pub fn flush_to_db(&self) {
+    pub async fn flush_to_db(&self) {
         if let Some(store) = &self.entity_store {
-            // FIX: use sync_all() so all three entity tables are replaced inside
-            // a single BEGIN IMMEDIATE / COMMIT transaction. Previously three
-            // separate DELETE+INSERT calls meant a crash between any two left
-            // the DB in a split-brain state (e.g. crew leads updated but
-            // passengers still showing old state).
-            store.sync_all(
-                self.crew_leads.list(),
-                self.passengers.list(),
-                self.passengers.deleted(),
-                self.resources.list(),
-                self.resources.deleted(),
-            );
+            store
+                .sync_all(
+                    self.crew_leads.list(),
+                    self.passengers.list(),
+                    self.passengers.deleted(),
+                    self.resources.list(),
+                    self.resources.deleted(),
+                )
+                .await;
         }
     }
 
@@ -171,9 +217,11 @@ impl World {
     /// `None` if in-memory only. Used by `GET /health/ready` for DB liveness.
     #[cfg(feature = "http")]
     #[must_use]
-    pub fn ping_db(&self) -> Option<bool> {
-        // FIX: map(SqliteEntityStore::ping_db) avoids redundant closure
-        self.entity_store.as_ref().map(SqliteEntityStore::ping_db)
+    pub async fn ping_db(&self) -> Option<bool> {
+        match &self.entity_store {
+            Some(store) => Some(store.ping_db().await),
+            None => None,
+        }
     }
 }
 
@@ -224,8 +272,14 @@ pub fn build_world_with_sqlite(db_path: &str) -> Result<World, BuildError> {
         // First run: seed demo entities, then persist them to the DB so
         // subsequent restarts can restore state without re-seeding.
         let mut world = build_world(audit_sink, usage_sink).map_err(BuildError::Domain)?;
-        world.entity_store = Some(entity_store);
-        world.flush_to_db();
+        entity_store.sync_all(
+            world.crew_leads.list(),
+            world.passengers.list(),
+            world.passengers.deleted(),
+            world.resources.list(),
+            world.resources.deleted(),
+        );
+        world.entity_store = Some(EntityStore::Sqlite(entity_store));
         Ok(world)
     } else {
         // Subsequent run: restore entity state from the database.
@@ -258,7 +312,7 @@ pub fn build_world_with_sqlite(db_path: &str) -> Result<World, BuildError> {
             resources,
             access,
             audit_sink,
-            entity_store: Some(entity_store),
+            entity_store: Some(EntityStore::Sqlite(entity_store)),
         })
     }
 }
@@ -426,7 +480,7 @@ pub async fn build_world_with_postgres(pg_url: &str) -> Result<World, BuildError
             .map_err(BuildError::Postgres)?;
         #[cfg(feature = "http")]
         {
-            world.entity_store = None;
+            world.entity_store = Some(EntityStore::Pg(store));
         }
         Ok(world)
     } else {
@@ -479,7 +533,7 @@ pub async fn build_world_with_postgres(pg_url: &str) -> Result<World, BuildError
             access,
             audit_sink: audit_sink_pg,
             #[cfg(feature = "http")]
-            entity_store: None,
+            entity_store: Some(EntityStore::Pg(store)),
         })
     }
 }
@@ -490,19 +544,19 @@ mod tests {
 
     // ── World::ping_db ────────────────────────────────────────────────────────
 
-    #[test]
-    fn ping_db_returns_none_for_in_memory_world() {
+    #[tokio::test]
+    async fn ping_db_returns_none_for_in_memory_world() {
         // build_demo_world() creates a World with entity_store: None
         // (no SQLite file path provided), so ping_db must return None.
         let world = build_demo_world().expect("build failed");
-        assert_eq!(world.ping_db(), None);
+        assert_eq!(world.ping_db().await, None);
     }
 
-    #[test]
-    fn ping_db_returns_some_true_for_sqlite_world() {
+    #[tokio::test]
+    async fn ping_db_returns_some_true_for_sqlite_world() {
         // An in-memory SQLite world has a live connection → ping returns Some(true).
         let world = build_world_with_sqlite(":memory:").expect("sqlite build failed");
-        assert_eq!(world.ping_db(), Some(true));
+        assert_eq!(world.ping_db().await, Some(true));
     }
 
     // ── BuildError::fmt (Display) ─────────────────────────────────────────────

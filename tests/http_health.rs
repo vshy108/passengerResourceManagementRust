@@ -102,6 +102,22 @@ async fn unknown_route_returns_404() {
 }
 
 #[tokio::test]
+async fn auth_check_returns_actor_for_valid_token() {
+    let app = app();
+    let (status, body) = send(&app, auth_req(Method::GET, "/auth/check", CL_TOKEN, None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["actor_id"], "cl-aria");
+}
+
+#[tokio::test]
+async fn auth_check_rejects_missing_token() {
+    let app = app();
+    let (status, body) = send(&app, req(Method::GET, "/auth/check", None)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["code"], "Unauthorized");
+}
+
+#[tokio::test]
 async fn malformed_json_body_returns_4xx() {
     let app = app();
     let bad = Request::builder()

@@ -15,6 +15,19 @@ This file records senior-review gaps found while preparing the project for code 
 
 ## Code / Product Follow-Ups
 
+### Current Fix Plan — 2026-05-11 Review Findings
+
+- [x] Restore the all-feature backend verification path by making HTTP tests
+  exhaustive over feature-gated audit sink variants.
+- [x] Align Playwright reset authentication with the documented local
+  `PRMS_API_KEYS` setup so `npm run test:e2e` is runnable from `dev.env`.
+- [x] Validate login tokens through an authenticated backend endpoint instead
+  of the public health endpoint.
+- [x] Have the React client send `If-Match` versions for passenger/resource
+  PATCH and DELETE operations so optimistic concurrency is active from the UI.
+- [x] Make PostgreSQL entity and event persistence write-through before
+  successful HTTP responses, matching the durability expectation of `PRMS_PG_URL`.
+
 - [x] Clarify whether passenger self-access must be enforced in the Rust service API or only by the HTTP shape.
   Self-access is enforced by design: `passenger_id` is derived from `Actor::Passenger`, not a separate parameter.
   Documented in `specs/05-access.md`.

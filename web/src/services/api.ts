@@ -27,6 +27,7 @@ export type DomainError  = ErrorCode | "NetworkError" | "Unknown";
 export type Result<T> = { ok: true; value: T } | { ok: false; error: DomainError };
 function ok<T>(value: T): Result<T> { return { ok: true, value }; }
 function err(error: DomainError): Result<never> { return { ok: false, error }; }
+function ifMatch(version: number): HeadersInit { return { "If-Match": `"${version}"` }; }
 
 /**
  * Resolved at every call so vitest (and other consumers) can override
@@ -158,6 +159,8 @@ export const api = {
       .then(async (r) => (r.ok ? ok(await r.text()) : err("Unknown")))
       .catch(() => err("NetworkError")),
 
+  authCheck: () => call<{ actor_id: string }>("/auth/check"),
+
   crewLeads: () => call<ApiCrewLead[]>("/crew-leads"),
   passengers: () => call<ApiPassenger[]>("/passengers"),
   resources: () => call<ApiResource[]>("/resources"),
@@ -226,15 +229,18 @@ export const api = {
   changePassengerTier: (
     id: string,
     tier: Tier,
+    version: number,
   ): Promise<Result<void>> =>
     call<void>(`/passengers/${encodeURIComponent(id)}/tier`, {
       method: "PATCH",
+      headers: ifMatch(version),
       body: JSON.stringify({ tier }),
     }),
 
-  softDeletePassenger: (id: string): Promise<Result<void>> =>
+  softDeletePassenger: (id: string, version: number): Promise<Result<void>> =>
     call<void>(`/passengers/${encodeURIComponent(id)}`, {
       method: "DELETE",
+      headers: ifMatch(version),
     }),
 
   createResource: (
@@ -256,14 +262,17 @@ export const api = {
   changeResourceMinTier: (
     id: string,
     tier: Tier,
+    version: number,
   ): Promise<Result<void>> =>
     call<void>(`/resources/${encodeURIComponent(id)}/min-tier`, {
       method: "PATCH",
+      headers: ifMatch(version),
       body: JSON.stringify({ tier }),
     }),
 
-  softDeleteResource: (id: string): Promise<Result<void>> =>
+  softDeleteResource: (id: string, version: number): Promise<Result<void>> =>
     call<void>(`/resources/${encodeURIComponent(id)}`, {
       method: "DELETE",
+      headers: ifMatch(version),
     }),
 };

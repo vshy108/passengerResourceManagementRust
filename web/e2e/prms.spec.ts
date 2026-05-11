@@ -21,7 +21,7 @@ async function resetServer(): Promise<void> {
   const ctx = await request.newContext({ baseURL: API });
   // FIX: actor identity now derived from bearer token, not request body.
   const r = await ctx.post("/reset", {
-    headers: { Authorization: "Bearer cl-aria-e2e-token" },
+    headers: { Authorization: "Bearer cl-aria" },
   });
   if (!r.ok()) {
     throw new Error(

@@ -361,14 +361,14 @@ function PassengersSection({
     }
   };
 
-  const changeTier = async (pid: string, t: Tier): Promise<void> => {
-    const r = await api.changePassengerTier(pid, t);
-    onChange(r.ok ? `${pid} → ${t}` : `change failed: ${r.error}`);
+  const changeTier = async (p: ApiPassenger, t: Tier): Promise<void> => {
+    const r = await api.changePassengerTier(p.id, t, p.version);
+    onChange(r.ok ? `${p.id} → ${t}` : `change failed: ${r.error}`);
   };
 
-  const remove = async (pid: string): Promise<void> => {
-    const r = await api.softDeletePassenger(pid);
-    onChange(r.ok ? `Deleted ${pid}` : `delete failed: ${r.error}`);
+  const remove = async (p: ApiPassenger): Promise<void> => {
+    const r = await api.softDeletePassenger(p.id, p.version);
+    onChange(r.ok ? `Deleted ${p.id}` : `delete failed: ${r.error}`);
   };
 
   return (
@@ -397,7 +397,7 @@ function PassengersSection({
                 <select
                   value={p.tier}
                   aria-label={`Change tier for ${p.name}`}
-                  onChange={(e) => void changeTier(p.id, e.target.value as Tier)}
+                  onChange={(e) => void changeTier(p, e.target.value as Tier)}
                 >
                   {TIERS.map((t) => (
                     <option key={t} value={t}>
@@ -405,7 +405,7 @@ function PassengersSection({
                     </option>
                   ))}
                 </select>
-                <button onClick={() => void remove(p.id)} aria-label={`Delete passenger ${p.name}`}>Delete</button>
+                <button onClick={() => void remove(p)} aria-label={`Delete passenger ${p.name}`}>Delete</button>
               </td>
             </tr>
           ))}
@@ -458,14 +458,14 @@ function ResourcesSection({
     }
   };
 
-  const changeMin = async (rid: string, t: Tier): Promise<void> => {
-    const r = await api.changeResourceMinTier(rid, t);
-    onChange(r.ok ? `${rid} min → ${t}` : `change failed: ${r.error}`);
+  const changeMin = async (resource: ApiResource, t: Tier): Promise<void> => {
+    const r = await api.changeResourceMinTier(resource.id, t, resource.version);
+    onChange(r.ok ? `${resource.id} min → ${t}` : `change failed: ${r.error}`);
   };
 
-  const remove = async (rid: string): Promise<void> => {
-    const r = await api.softDeleteResource(rid);
-    onChange(r.ok ? `Deleted ${rid}` : `delete failed: ${r.error}`);
+  const remove = async (resource: ApiResource): Promise<void> => {
+    const r = await api.softDeleteResource(resource.id, resource.version);
+    onChange(r.ok ? `Deleted ${resource.id}` : `delete failed: ${r.error}`);
   };
 
   return (
@@ -496,7 +496,7 @@ function ResourcesSection({
                 <select
                   value={r.min_tier}
                   aria-label={`Change min tier for ${r.name}`}
-                  onChange={(e) => void changeMin(r.id, e.target.value as Tier)}
+                  onChange={(e) => void changeMin(r, e.target.value as Tier)}
                 >
                   {TIERS.map((t) => (
                     <option key={t} value={t}>
@@ -504,7 +504,7 @@ function ResourcesSection({
                     </option>
                   ))}
                 </select>
-                <button onClick={() => void remove(r.id)} aria-label={`Delete resource ${r.name}`}>Delete</button>
+                <button onClick={() => void remove(r)} aria-label={`Delete resource ${r.name}`}>Delete</button>
               </td>
             </tr>
           ))}

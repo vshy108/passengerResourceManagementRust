@@ -28,15 +28,15 @@ export function PassengersPage(): JSX.Element {
     }
   };
 
-  const changeTier = async (pid: string, t: Tier): Promise<void> => {
-    const r = await api.changePassengerTier(pid, t);
-    announce(r.ok ? `${pid} → ${t}` : `change failed: ${r.error}`);
+  const changeTier = async (p: { id: string; version: number }, t: Tier): Promise<void> => {
+    const r = await api.changePassengerTier(p.id, t, p.version);
+    announce(r.ok ? `${p.id} → ${t}` : `change failed: ${r.error}`);
     if (r.ok) await refresh();
   };
 
-  const remove = async (pid: string): Promise<void> => {
-    const r = await api.softDeletePassenger(pid);
-    announce(r.ok ? `Deleted ${pid}` : `delete failed: ${r.error}`);
+  const remove = async (p: { id: string; version: number }): Promise<void> => {
+    const r = await api.softDeletePassenger(p.id, p.version);
+    announce(r.ok ? `Deleted ${p.id}` : `delete failed: ${r.error}`);
     if (r.ok) await refresh();
   };
 
@@ -68,7 +68,7 @@ export function PassengersPage(): JSX.Element {
                 <select
                   value={p.tier}
                   onChange={(e) =>
-                    void changeTier(p.id, e.target.value as Tier)
+                    void changeTier(p, e.target.value as Tier)
                   }
                 >
                   {TIERS.map((t) => (
@@ -77,7 +77,7 @@ export function PassengersPage(): JSX.Element {
                     </option>
                   ))}
                 </select>
-                <button onClick={() => void remove(p.id)}>Delete</button>
+                <button onClick={() => void remove(p)}>Delete</button>
               </td>
             </tr>
           ))}

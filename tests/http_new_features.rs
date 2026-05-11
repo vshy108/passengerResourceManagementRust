@@ -342,6 +342,8 @@ async fn audit_verify_detects_tampered_hash() {
     let sink_clone: InMemoryAdminEventSink = match &world.audit_sink {
         AuditSink::InMemory(s) => s.clone(),
         AuditSink::Sqlite(_) => panic!("expected InMemory audit sink in demo world"),
+        #[cfg(feature = "postgres")]
+        AuditSink::Pg(_) => panic!("expected InMemory audit sink in demo world"),
     };
 
     let api_keys: HashMap<String, String> = [(CL_TOKEN.to_owned(), ARIA.to_owned())].into();

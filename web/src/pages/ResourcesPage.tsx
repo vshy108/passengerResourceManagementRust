@@ -32,15 +32,15 @@ export function ResourcesPage(): JSX.Element {
     }
   };
 
-  const changeMin = async (rid: string, t: Tier): Promise<void> => {
-    const r = await api.changeResourceMinTier(rid, t);
-    announce(r.ok ? `${rid} min → ${t}` : `change failed: ${r.error}`);
+  const changeMin = async (resource: ApiResource, t: Tier): Promise<void> => {
+    const r = await api.changeResourceMinTier(resource.id, t, resource.version);
+    announce(r.ok ? `${resource.id} min → ${t}` : `change failed: ${r.error}`);
     if (r.ok) await refresh();
   };
 
-  const remove = async (rid: string): Promise<void> => {
-    const r = await api.softDeleteResource(rid);
-    announce(r.ok ? `Deleted ${rid}` : `delete failed: ${r.error}`);
+  const remove = async (resource: ApiResource): Promise<void> => {
+    const r = await api.softDeleteResource(resource.id, resource.version);
+    announce(r.ok ? `Deleted ${resource.id}` : `delete failed: ${r.error}`);
     if (r.ok) await refresh();
   };
 
@@ -81,7 +81,7 @@ export function ResourcesPage(): JSX.Element {
                 <select
                   value={r.min_tier}
                   onChange={(e) =>
-                    void changeMin(r.id, e.target.value as Tier)
+                    void changeMin(r, e.target.value as Tier)
                   }
                 >
                   {TIERS.map((t) => (
@@ -90,7 +90,7 @@ export function ResourcesPage(): JSX.Element {
                     </option>
                   ))}
                 </select>
-                <button onClick={() => void remove(r.id)}>Delete</button>
+                <button onClick={() => void remove(r)}>Delete</button>
               </td>
             </tr>
           ))}

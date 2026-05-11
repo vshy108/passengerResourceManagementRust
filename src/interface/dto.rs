@@ -483,6 +483,14 @@ pub struct ErrorBody {
     pub code: ErrorCode,
 }
 
+// ---------- auth --------------------------------------------------------
+
+/// Response body for `GET /auth/check`.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct AuthCheckDto {
+    pub actor_id: String,
+}
+
 // ---------- audit verify ------------------------------------------------
 
 /// Response body for `GET /audit/verify`.

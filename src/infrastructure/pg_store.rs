@@ -432,24 +432,16 @@ impl PgEntityStore {
 
 /// Write-through `PostgreSQL` admin-event sink.
 ///
-/// Each `append` call:
-/// 1. Immediately stores the event in the in-memory buffer (for fast reads).
-/// 2. Sends the event to a background tokio task that writes it to `PostgreSQL`.
-///
-/// Events are visible to `snapshot()` immediately; PG persistence is
-/// best-effort on a background task (fire-and-forget). A channel-closed
-/// error is logged — it means the background task exited, which is unrecoverable.
-///
-/// `Clone` is cheap: `PgPool` and `UnboundedSender` are `Arc`-backed.
+/// Each `append` call persists to `PostgreSQL` before updating the in-memory
+/// buffer, matching the `SQLite` sink's durability contract.
 #[derive(Clone)]
 pub struct PgAdminEventSink {
     mem: crate::infrastructure::in_memory_admin_event_sink::InMemoryAdminEventSink,
-    tx: tokio::sync::mpsc::UnboundedSender<AdminEvent>,
+    store: PgEntityStore,
 }
 
 impl PgAdminEventSink {
     /// Construct the sink, pre-loading historical events from `existing`.
-    /// The background writer task is spawned immediately on the current tokio runtime.
     #[must_use]
     pub fn new(pool: &PgPool, existing: Vec<AdminEvent>) -> Self {
         use crate::application::ports::AdminEventSink as _;
@@ -459,21 +451,10 @@ impl PgAdminEventSink {
         for ev in existing {
             mem.append(ev);
         }
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AdminEvent>();
-        let pool_bg = pool.clone();
-        tokio::spawn(async move {
-            let store = PgEntityStore::new(pool_bg);
-            while let Some(event) = rx.recv().await {
-                if let Err(e) = store.append_admin_event(&event).await {
-                    tracing::error!(
-                        event_id = %event.id,
-                        error = %e,
-                        "PgAdminEventSink: failed to persist admin event to PostgreSQL"
-                    );
-                }
-            }
-        });
-        Self { mem, tx }
+        Self {
+            mem,
+            store: PgEntityStore::new(pool.clone()),
+        }
     }
 
     /// Snapshot of all events (historical + current session).
@@ -491,17 +472,14 @@ impl PgAdminEventSink {
 
 impl crate::application::ports::AdminEventSink for PgAdminEventSink {
     fn append(&mut self, event: AdminEvent) {
-        // Write to in-memory first for immediate read visibility.
-        self.mem.append(event.clone());
-        // FIX: log on channel-closed rather than silently discarding the event.
-        // A closed channel means the background PG writer task has exited
-        // (unrecoverable), so the error is surfaced to the operator via logs.
-        if let Err(e) = self.tx.send(event) {
-            tracing::error!(
-                event_id = %e.0.id,
-                "PgAdminEventSink: background writer channel closed; event not persisted to PostgreSQL"
-            );
-        }
+        // FIX: persist before updating memory so a successful domain mutation
+        // cannot report an audit event that PostgreSQL failed to store.
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(self.store.append_admin_event(&event))
+                .expect("postgres admin_events INSERT failed");
+        });
+        self.mem.append(event);
     }
 }
 
@@ -509,12 +487,12 @@ impl crate::application::ports::AdminEventSink for PgAdminEventSink {
 
 /// Write-through `PostgreSQL` usage-event sink.
 ///
-/// Same design as [`PgAdminEventSink`]: in-memory buffer for fast reads,
-/// background tokio task for PG persistence.
+/// Same durability contract as [`PgAdminEventSink`]: persist first, then update
+/// the in-memory read cache.
 #[derive(Clone)]
 pub struct PgUsageEventSink {
     mem: crate::infrastructure::in_memory_usage_event_sink::InMemoryUsageEventSink,
-    tx: tokio::sync::mpsc::UnboundedSender<UsageEvent>,
+    store: PgEntityStore,
 }
 
 impl PgUsageEventSink {
@@ -527,21 +505,10 @@ impl PgUsageEventSink {
         for ev in existing {
             mem.append(ev);
         }
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UsageEvent>();
-        let pool_bg = pool.clone();
-        tokio::spawn(async move {
-            let store = PgEntityStore::new(pool_bg);
-            while let Some(event) = rx.recv().await {
-                if let Err(e) = store.append_usage_event(&event).await {
-                    tracing::error!(
-                        event_id = %event.id,
-                        error = %e,
-                        "PgUsageEventSink: failed to persist usage event to PostgreSQL"
-                    );
-                }
-            }
-        });
-        Self { mem, tx }
+        Self {
+            mem,
+            store: PgEntityStore::new(pool.clone()),
+        }
     }
 
     /// List all usage events (historical + current session).
@@ -554,13 +521,14 @@ impl PgUsageEventSink {
 
 impl crate::application::ports::UsageEventSink for PgUsageEventSink {
     fn append(&mut self, event: UsageEvent) {
-        self.mem.append(event.clone());
-        if let Err(e) = self.tx.send(event) {
-            tracing::error!(
-                event_id = %e.0.id,
-                "PgUsageEventSink: background writer channel closed; event not persisted to PostgreSQL"
-            );
-        }
+        // FIX: persist before updating memory so access attempts are not
+        // reported as recorded unless PostgreSQL has accepted the event.
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(self.store.append_usage_event(&event))
+                .expect("postgres usage_events INSERT failed");
+        });
+        self.mem.append(event);
     }
 }
 

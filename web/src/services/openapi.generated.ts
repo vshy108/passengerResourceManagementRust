@@ -52,6 +52,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["auth_check"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/crew-leads": {
         parameters: {
             query?: never;
@@ -356,6 +372,10 @@ export interface components {
             /** @description `true` when the entire hash chain is intact. */
             valid: boolean;
         };
+        /** @description Response body for `GET /auth/check`. */
+        AuthCheckDto: {
+            actor_id: string;
+        };
         ChangeTierReq: {
             tier: components["schemas"]["TierDto"];
         };
@@ -532,6 +552,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditVerifyDto"];
+                };
+            };
+        };
+    };
+    auth_check: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bearer token is valid */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthCheckDto"];
+                };
+            };
+            /** @description Missing or invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

@@ -4,6 +4,22 @@ These are the house rules for any AI coding agent (Copilot, Cursor, etc.) or
 human contributor working in this repository. Read this file before making
 changes.
 
+## 0. Agent Operating Loop
+- Start from the user's requested behavior, then locate the nearest spec,
+  test, service, or interface boundary that describes it.
+- Use the project vocabulary from `specs/00-glossary.md` in test names,
+  issue notes, explanations, and new domain concepts.
+- Prefer a thin vertical slice over broad horizontal work. A good slice is
+  independently verifiable and touches only the layers needed for that behavior.
+- Before changing code, identify the fastest reliable feedback loop: focused
+  unit/integration test, HTTP test, CLI command, or existing acceptance flow.
+- If you do not understand the area, zoom out first: map the relevant modules,
+  callers, ports, adapters, specs, and tests before proposing edits.
+- Keep working notes tied to evidence. If a hypothesis is not falsifiable by a
+  command, test, or code read, sharpen it before acting on it.
+- Do not leave temporary debug code, prototype code, or generated artifacts in
+  the main path unless the user explicitly asks to keep them.
+
 ## 1. Language & Toolchain
 - **Rust**, edition **2024**, stable channel pinned via `rust-toolchain.toml`.
 - `#![forbid(unsafe_code)]` in the domain module; no `unsafe` anywhere
@@ -49,6 +65,15 @@ interface  →  application  →  domain
 - **`cargo nextest`** (preferred) or `cargo test`.
 - **Test names mirror spec IDs**:
   `#[test] fn tp_r1_s10_rank_silver_is_one() { … }`.
+- Tests should verify observable behavior through public interfaces, not private
+  implementation details. Integration-style tests are preferred when they cover
+  the real behavior without excessive setup.
+- Work in red-green-refactor cycles: write one failing test for one behavior,
+  implement the minimum production code to pass, then repeat. Do not write a
+  batch of speculative tests before implementation has taught you the shape of
+  the code.
+- Never refactor while tests are red. Refactor only after the current behavior
+  is green, and run the relevant tests after each meaningful refactor step.
 - Unit tests live in `#[cfg(test)] mod tests` blocks alongside the code
   they cover.
 - Integration tests live in `tests/` (one file per flow).
@@ -94,10 +119,16 @@ Specs live in `specs/`. Each file has numbered rules (`R1`, `R2`),
 invariants (`I1`), and scenarios (`S1`). Workflow per slice:
 
 1. Open the spec file.
-2. Generate failing tests named after the scenario IDs.
-3. Implement the minimum code to make them pass.
-4. Refactor with tests green.
-5. Commit with the spec ID in the message.
+2. Choose one tracer-bullet behavior that can pass through the necessary layers
+  end to end.
+3. Generate one failing test named after the scenario ID.
+4. Implement the minimum code to make that test pass.
+5. Refactor with tests green.
+6. Repeat for the next behavior.
+7. Commit with the spec ID in the message.
+
+If the requested behavior is not covered by an existing spec, propose the spec
+change first. Do not rewrite specs merely to match existing code.
 
 ## 10. SOLID & design patterns
 Apply where they reduce coupling. Do not introduce a pattern without a
@@ -128,7 +159,61 @@ Patterns we will **not** use unless justified: ambient singletons,
 service locators, deep generic-bound towers, inheritance simulation via
 trait objects when a plain enum suffices.
 
-## 11. Reviewer DX
+## 11. Debugging & Diagnosis
+For bugs, regressions, flaky behavior, or performance issues, follow a
+diagnosis loop before fixing:
+
+1. Build a fast, deterministic feedback loop that reproduces the reported
+   symptom. Prefer a failing test; otherwise use an HTTP script, CLI command,
+   captured fixture, or minimal harness.
+2. Confirm the loop reproduces the user's actual failure, not a nearby failure.
+3. List 3-5 ranked, falsifiable hypotheses. Each hypothesis should predict what
+   observation or change would confirm or disprove it.
+4. Instrument only at decision points that distinguish the hypotheses. Use
+   uniquely tagged temporary logs such as `[DEBUG-access-001]`, then remove them
+   before finishing.
+5. Convert the minimized reproduction into a regression test at the correct
+   public seam before applying the fix whenever such a seam exists.
+6. Re-run the original reproduction and the new regression test before declaring
+   the bug fixed.
+
+If no correct test seam exists, document that as an architectural finding rather
+than adding a misleading shallow test.
+
+## 12. Architecture Improvement
+- Treat a module as its interface plus implementation. The interface includes
+  types, invariants, error modes, ordering constraints, and configuration that
+  callers must understand.
+- Prefer deep modules: small, stable interfaces that hide meaningful behavior
+  and concentrate change. Be suspicious of shallow pass-through modules whose
+  interface is as complex as their implementation.
+- Use the deletion test before proposing abstractions: if deleting a module only
+  moves the same complexity into callers, it was not earning its keep.
+- Add or preserve seams where they improve locality, testability, or adapter
+  substitution. One concrete adapter is only a possible seam; two adapters make
+  the seam real.
+- Do not perform architecture rewrites while delivering a behavior slice unless
+  the rewrite is necessary for that slice. Surface larger opportunities as
+  follow-up work with files involved, problem, proposed change, and expected
+  testing benefit.
+
+## 13. Planning, Issues, and Prototypes
+- Break larger plans into independently verifiable vertical slices. Each slice
+  should describe end-to-end behavior, acceptance criteria, dependencies, and
+  whether it needs human input.
+- For PRD or issue text, avoid fragile file-path-heavy implementation plans.
+  Capture durable decisions: affected modules, public interfaces, domain rules,
+  API contracts, schemas, and testing decisions.
+- Prototype only to answer a specific question. Mark prototype code clearly as
+  throwaway, keep it close to the relevant module or UI route, and provide one
+  command to run it.
+- Prototype state should be in-memory by default. Skip production polish,
+  persistence, broad error handling, and abstractions unless they are the thing
+  being tested.
+- When the question is answered, delete the prototype or absorb the validated
+  decision into production code, tests, specs, or an ADR.
+
+## 14. Reviewer DX
 The reviewer must be able to:
 
 ```bash
