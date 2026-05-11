@@ -483,3 +483,48 @@ pub async fn build_world_with_postgres(pg_url: &str) -> Result<World, BuildError
         })
     }
 }
+
+#[cfg(all(test, feature = "http"))]
+mod tests {
+    use super::*;
+
+    // ── World::ping_db ────────────────────────────────────────────────────────
+
+    #[test]
+    fn ping_db_returns_none_for_in_memory_world() {
+        // build_demo_world() creates a World with entity_store: None
+        // (no SQLite file path provided), so ping_db must return None.
+        let world = build_demo_world().expect("build failed");
+        assert_eq!(world.ping_db(), None);
+    }
+
+    #[test]
+    fn ping_db_returns_some_true_for_sqlite_world() {
+        // An in-memory SQLite world has a live connection → ping returns Some(true).
+        let world = build_world_with_sqlite(":memory:").expect("sqlite build failed");
+        assert_eq!(world.ping_db(), Some(true));
+    }
+
+    // ── BuildError::fmt (Display) ─────────────────────────────────────────────
+
+    #[test]
+    fn build_error_display_domain_variant() {
+        let e = BuildError::Domain(DomainError::PassengerNotFound);
+        assert!(
+            e.to_string().starts_with("domain error:"),
+            "expected 'domain error:…', got: {e}"
+        );
+    }
+
+    #[test]
+    fn build_error_display_sqlite_variant() {
+        // Construct a rusqlite::Error without opening a real connection.
+        let sqlite_err =
+            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(1), Some("test".to_owned()));
+        let e = BuildError::Sqlite(sqlite_err);
+        assert!(
+            e.to_string().starts_with("sqlite error:"),
+            "expected 'sqlite error:…', got: {e}"
+        );
+    }
+}
