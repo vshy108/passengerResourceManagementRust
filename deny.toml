@@ -6,34 +6,6 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
 ignore = [
-    # sqlx 0.8.0 (postgres feature) pulls in rustls 0.21 which brings older
-    # transitive deps. All items below are in the sqlx → sqlx-core dep chain;
-    # we cannot upgrade them without a new sqlx major that migrates to rustls 0.23+.
-
-    # RUSTSEC-2024-0363: Binary protocol misinterpretation in sqlx via
-    # truncating casts on values > 4 GiB. Our postgres adapter only ever
-    # writes bounded, internally-generated payloads (IDs, short strings,
-    # nanosecond timestamps). No user-supplied value can reach 4 GiB.
-    { id = "RUSTSEC-2024-0363" },
-
-    # RUSTSEC-2024-0436: paste crate is unmaintained (archived upstream).
-    # Used solely by sqlx-core as a proc-macro helper; not in our own code.
-    # No vulnerability disclosed — only a maintenance concern.
-    { id = "RUSTSEC-2024-0436" },
-
-    # RUSTSEC-2025-0134: rustls-pemfile is unmaintained (archived upstream).
-    # Used by sqlx-core for PEM parsing; the new API lives in rustls-pki-types.
-    # No vulnerability disclosed — only a maintenance concern.
-    { id = "RUSTSEC-2025-0134" },
-
-    # RUSTSEC-2026-0098, 0099, 0104: rustls-webpki 0.101.7 TLS cert-validation
-    # bugs. These are reachable only after signature verification and require
-    # mis-issued CA certificates to exploit. The fixed version (>= 0.103.12)
-    # requires rustls 0.23+ which sqlx 0.8 does not yet consume. Tracked:
-    # upgrade sqlx when a 0.8.x patch that uses rustls 0.23 is released.
-    { id = "RUSTSEC-2026-0098" },
-    { id = "RUSTSEC-2026-0099" },
-    { id = "RUSTSEC-2026-0104" },
 ]
 
 [bans]
@@ -58,9 +30,10 @@ allow = [
     # Added for tower_governor dependencies:
     "Zlib",  # foldhash — OSI-approved permissive license
     "ISC",   # forwarded-header-value — OSI-approved permissive license
-    # Added for sqlx (postgres feature) → sqlx-core → webpki-roots:
-    "MPL-2.0",  # webpki-roots — Mozilla Public License 2.0; copyleft applies
-                # only to modifications of the file itself, not to linking.
+    # FIX: sqlx 0.8.6 now resolves webpki-roots releases licensed under
+    # CDLA-Permissive-2.0, so the older MPL-2.0 allow-list entry rejected CI.
+    # Allow the current permissive root-store license explicitly.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 
