@@ -42,10 +42,15 @@ jobs:
         run: cargo clippy --all-targets --features http -- -D warnings -W clippy::pedantic
       - name: nextest (default features)
         run: cargo nextest run
+      - name: nextest (all features)
+        # FIX: default-feature test discovery reports HTTP/SQLite integration
+        # targets as 0-test binaries because their tests are feature-gated.
+        # Run all features explicitly so CI exercises those targets instead of
+        # relying on coverage as the only feature-enabled test pass.
+        run: cargo nextest run --all-features
       - name: coverage
-        # FIX: removed the separate "nextest (--features http)" step — coverage
-        # runs the same test suite under llvm-cov, so the standalone step was a
-        # redundant compile+run with no additional signal.
+        # Coverage keeps the HTTP feature enabled because the public adapter is
+        # part of the measured review surface.
         run: |
           cargo llvm-cov nextest --features http \
             --ignore-filename-regex 'src/bin/' \

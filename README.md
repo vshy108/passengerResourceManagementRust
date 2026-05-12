@@ -191,8 +191,8 @@ and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
   — 96%+ line coverage; CI fails below 96. Only the `serve` binary entrypoint
   is excluded (it boots real I/O and is not meaningfully testable in unit tests).
 - CI: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs fmt, clippy
-  (default + `--features http`), nextest (default + `--features http`), and
-  the web build on every push and PR.
+  (default + `--features http`), nextest (default + `--all-features`), HTTP
+  coverage, and the web build on every push and PR.
 
 See [`AGENTS.md`](./AGENTS.md) for full contribution rules.
 

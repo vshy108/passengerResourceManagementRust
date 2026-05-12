@@ -13,6 +13,7 @@
 mod http_common;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::http::{Method, StatusCode};
 
@@ -21,17 +22,30 @@ use passenger_resource_management::interface::http::{AppState, CorsOrigins, rout
 
 use http_common::{CL_TOKEN, req, send};
 
+static DB_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn unique_db_path(prefix: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir();
+    let counter = DB_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    // FIX: clock-only filenames can collide when nextest starts SQLite tests
+    // in parallel, causing one test to open another test's locked DB file.
+    // Include process id plus an atomic suffix so each test owns its database.
+    dir.join(format!(
+        "{prefix}_{}_{}_{}.db",
+        std::process::id(),
+        nanos,
+        counter
+    ))
+}
+
 /// Build a SQLite-backed HTTP app using a temp file, returning the app and the
 /// db path so the caller can clean up.
 fn sqlite_app() -> (axum::Router, std::path::PathBuf) {
-    let dir = std::env::temp_dir();
-    let db_path = dir.join(format!(
-        "prms_http_test_{}.db",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
+    let db_path = unique_db_path("prms_http_test");
     let db_str = db_path.to_str().expect("tempdir UTF-8");
     let world = build_world_with_sqlite(db_str).expect("sqlite world build failed");
     let api_keys: HashMap<String, String> = [(CL_TOKEN.to_owned(), "cl-aria".to_owned())].into();
@@ -124,14 +138,7 @@ async fn sqlite_audit_verify_covers_sqlite_skip_path() {
 
 #[tokio::test]
 async fn router_convenience_wrapper_builds_working_app() {
-    let dir = std::env::temp_dir();
-    let db_path = dir.join(format!(
-        "prms_router_test_{}.db",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
+    let db_path = unique_db_path("prms_router_test");
     let db_str = db_path.to_str().expect("tempdir UTF-8");
     let world = build_world_with_sqlite(db_str).expect("world build failed");
     let api_keys: HashMap<String, String> = [(CL_TOKEN.to_owned(), "cl-aria".to_owned())].into();
