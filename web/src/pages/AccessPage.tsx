@@ -7,6 +7,9 @@ export function AccessPage(): JSX.Element {
   const [flash, setFlash] = useState("");
   const [pid, setPid] = useState("");
   const [rid, setRid] = useState("");
+  // FIX: track in-flight state so the button is disabled during the async
+  // token-swap, preventing a race if the user clicks twice quickly.
+  const [pending, setPending] = useState(false);
 
   const announce = (msg: string): void => {
     setFlash(msg);
@@ -29,14 +32,18 @@ export function AccessPage(): JSX.Element {
   );
 
   const attempt = async (): Promise<void> => {
-    if (!validPid || !validRid) return;
+    if (!validPid || !validRid || pending) return;
     // FIX: actor identity derived from bearer token, not request body.
     // Temporarily swap to the passenger's token (demo: token == passenger id),
     // then restore the previous token after the access attempt completes.
+    // setPending gates re-entry so a second click before the await resolves
+    // cannot start a second token-swap that races with the restore.
+    setPending(true);
     const prevToken = api.getToken();
     api.setToken(validPid);
     const r = await api.useResource(validRid);
     api.setToken(prevToken);
+    setPending(false);
     announce(r.ok ? `Allowed (event #${r.value.id})` : r.error);
     await refresh();
   };
@@ -73,7 +80,7 @@ export function AccessPage(): JSX.Element {
         </select>
         <button
           onClick={() => void attempt()}
-          disabled={!validPid || !validRid}
+          disabled={!validPid || !validRid || pending}
           data-testid="btn-attempt-access"
         >
           Attempt access
