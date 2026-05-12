@@ -836,7 +836,10 @@ async fn create_passenger(
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
-    if let Some(cached) = idem_key.as_deref().and_then(|k| idempotency_get(&state, k)) {
+    // FIX: scope key by actor so two actors sharing the same Idempotency-Key
+    // string do not collide in the cache and receive each other's 201 responses.
+    let scoped_key = idem_key.as_deref().map(|k| format!("{actor_id}:{k}"));
+    if let Some(cached) = scoped_key.as_deref().and_then(|k| idempotency_get(&state, k)) {
         return cached;
     }
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
@@ -854,7 +857,7 @@ async fn create_passenger(
             tracing::info!(passenger_id = %p.id.0, tier = ?p.tier, actor = %actor_id, "passenger created");
             let dto = PassengerDto::from(&p);
             let body = serde_json::to_vec(&dto).expect("PassengerDto serialization is infallible");
-            if let Some(key) = idem_key {
+            if let Some(key) = scoped_key {
                 idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body));
             }
             (StatusCode::CREATED, Json(dto)).into_response()
@@ -999,7 +1002,10 @@ async fn create_resource(
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
-    if let Some(cached) = idem_key.as_deref().and_then(|k| idempotency_get(&state, k)) {
+    // FIX: scope key by actor so two actors sharing the same Idempotency-Key
+    // string do not collide in the cache and receive each other's 201 responses.
+    let scoped_key = idem_key.as_deref().map(|k| format!("{actor_id}:{k}"));
+    if let Some(cached) = scoped_key.as_deref().and_then(|k| idempotency_get(&state, k)) {
         return cached;
     }
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
@@ -1023,7 +1029,7 @@ async fn create_resource(
             tracing::info!(resource_id = %r.id.0, min_tier = ?r.min_tier, actor = %actor_id, "resource created");
             let dto = ResourceDto::from(&r);
             let body = serde_json::to_vec(&dto).expect("ResourceDto serialization is infallible");
-            if let Some(key) = idem_key {
+            if let Some(key) = scoped_key {
                 idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body));
             }
             (StatusCode::CREATED, Json(dto)).into_response()
