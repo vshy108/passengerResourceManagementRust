@@ -40,7 +40,9 @@ subtle = { version = "2", optional = true }
 # PostgreSQL adapter — async, connection-pool-based. `tls-rustls` is pure Rust
 # (no system-OpenSSL dep), required even when the server uses plain TCP because
 # sqlx links the rustls crate regardless of whether TLS is negotiated.
-sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "tls-rustls"], optional = true }
+# FIX: disable sqlx defaults so the Postgres adapter does not pull in
+# sqlx-sqlite, which conflicts with rusqlite's libsqlite3-sys link dependency.
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls"], optional = true }
 # SHA-256 hashing for the tamper-evident audit log hash chain.
 sha2 = { version = "0.10", optional = true }
 # Hex encoding for SHA-256 digests stored/compared as strings.
