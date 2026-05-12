@@ -37,29 +37,32 @@ function getBase(): string {
   return (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
 }
 
-/** Known server-side error codes. Add client-side codes (NetworkError, Unknown)
- * to the set only for runtime validation — they are NOT in the generated type.
- */
-const KNOWN_CODES: ReadonlySet<string> = new Set<string>([
-  "UnauthorizedActor",
-  "AccessDenied",
-  "PassengerNotFound",
-  "PassengerAlreadyExists",
-  "ResourceNotFound",
-  "ResourceAlreadyExists",
-  "CrewLeadNotFound",
-  "CrewLeadAlreadyExists",
-  "CrewLeadLimitReached",
-  "CrewLeadMinimumBreached",
-  "CrewLeadBootstrapInvalid",
-  "InvalidInput",
-  "Unauthorized",
-  "VersionConflict",
-  "InternalError",
-  "DatabaseUnreachable",
-  "NetworkError",
-  "Unknown",
-]);
+// FIX: the runtime validator used to be a hand-maintained string set that could
+// drift from the generated OpenAPI ErrorCode union. This exhaustive Record
+// forces typecheck to fail whenever the Rust enum changes and the generated type
+// gains or loses a code that SERVER_ERROR_CODE_MAP does not mirror.
+const SERVER_ERROR_CODE_MAP = {
+  UnauthorizedActor: true,
+  AccessDenied: true,
+  PassengerNotFound: true,
+  PassengerAlreadyExists: true,
+  ResourceNotFound: true,
+  ResourceAlreadyExists: true,
+  CrewLeadNotFound: true,
+  CrewLeadAlreadyExists: true,
+  CrewLeadLimitReached: true,
+  CrewLeadMinimumBreached: true,
+  CrewLeadBootstrapInvalid: true,
+  InvalidInput: true,
+  Unauthorized: true,
+  VersionConflict: true,
+  InternalError: true,
+  DatabaseUnreachable: true,
+} as const satisfies Record<ErrorCode, true>;
+
+const KNOWN_CODES: ReadonlySet<string> = new Set<string>(
+  Object.keys(SERVER_ERROR_CODE_MAP),
+);
 
 function toDomainError(code: string | undefined): DomainError {
   if (code !== undefined && KNOWN_CODES.has(code)) {
