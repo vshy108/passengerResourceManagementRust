@@ -73,3 +73,18 @@ onboard facilities. Only Crew Leads may mutate resources.
 | RS-R4 / RS-R5 | RS-S7, RS-S8 | ditto |
 | RS-R6 | RS-S9 | ditto |
 | RS-R7 | RS-S10, RS-S11 | uses `Tier::can_access` |
+
+## Implementation notes
+
+### RS-N1 — `version` counter is in-memory only (not persisted)
+The optimistic-concurrency `version` field on `Resource` is incremented
+in-memory on each successful `change_min_tier` or `soft_delete` call. It is
+**not** written to the SQLite or PostgreSQL entity store; on restart, every
+resource reloads with `version = 0`.
+
+Consequence: an `If-Match: "N"` check from a client that observed `N > 0`
+before a server restart will succeed with `"0"` after the restart, bypassing
+the conflict guard for that request.
+
+TODO: add a `version INTEGER NOT NULL DEFAULT 0` column to the `resources`
+table and persist/restore it during `sync_all` / load to close this gap.
