@@ -839,7 +839,10 @@ async fn create_passenger(
     // FIX: scope key by actor so two actors sharing the same Idempotency-Key
     // string do not collide in the cache and receive each other's 201 responses.
     let scoped_key = idem_key.as_deref().map(|k| format!("{actor_id}:{k}"));
-    if let Some(cached) = scoped_key.as_deref().and_then(|k| idempotency_get(&state, k)) {
+    if let Some(cached) = scoped_key
+        .as_deref()
+        .and_then(|k| idempotency_get(&state, k))
+    {
         return cached;
     }
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
@@ -1005,7 +1008,10 @@ async fn create_resource(
     // FIX: scope key by actor so two actors sharing the same Idempotency-Key
     // string do not collide in the cache and receive each other's 201 responses.
     let scoped_key = idem_key.as_deref().map(|k| format!("{actor_id}:{k}"));
-    if let Some(cached) = scoped_key.as_deref().and_then(|k| idempotency_get(&state, k)) {
+    if let Some(cached) = scoped_key
+        .as_deref()
+        .and_then(|k| idempotency_get(&state, k))
+    {
         return cached;
     }
     let actor = Actor::CrewLead(CrewLeadId(actor_id.clone()));
