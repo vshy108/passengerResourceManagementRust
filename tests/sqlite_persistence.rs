@@ -87,6 +87,10 @@ fn entity_state_survives_restart_via_sqlite() {
             Tier::Gold,
             "tier change should have been persisted"
         );
+        assert_eq!(
+            ps001.version, 1,
+            "passenger version should survive restart for If-Match protection"
+        );
 
         // Resources: res-lounge was soft-deleted, so active list has 2.
         assert_eq!(
@@ -98,6 +102,12 @@ fn entity_state_survives_restart_via_sqlite() {
         world2
             .resources
             .get(&ResourceId("res-lounge".into()))
+            .map(|resource| {
+                assert_eq!(
+                    resource.version, 1,
+                    "resource version should survive restart for If-Match protection"
+                );
+            })
             .expect("soft-deleted resource should still be retrievable via get()");
     }
 

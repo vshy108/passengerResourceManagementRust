@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS passengers (
     id         TEXT    PRIMARY KEY NOT NULL,
     name       TEXT    NOT NULL,
     tier       TEXT    NOT NULL,
-    deleted_at BIGINT
+    deleted_at BIGINT,
+    version    BIGINT  NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS resources (
@@ -19,8 +20,12 @@ CREATE TABLE IF NOT EXISTS resources (
     name       TEXT    NOT NULL,
     category   TEXT    NOT NULL,
     min_tier   TEXT    NOT NULL,
-    deleted_at BIGINT
+    deleted_at BIGINT,
+    version    BIGINT  NOT NULL DEFAULT 0
 );
+
+ALTER TABLE passengers ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE resources ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS usage_events (
     id                  TEXT   PRIMARY KEY NOT NULL,

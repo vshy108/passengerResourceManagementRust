@@ -116,6 +116,17 @@ fn kind_from_str(s: &str) -> rusqlite::Result<TargetKind> {
     }
 }
 
+fn ensure_column(conn: &Connection, table: &str, column: &str, ddl: &str) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(());
+        }
+    }
+    conn.execute_batch(ddl)
+}
+
 // ---------- schema -------------------------------------------------------
 
 /// Open (or create) a `SQLite` database at `path`, enable WAL mode, and
@@ -162,14 +173,16 @@ pub fn open_db(path: &str) -> rusqlite::Result<Connection> {
             id         TEXT PRIMARY KEY NOT NULL,
             name       TEXT NOT NULL,
             tier       TEXT NOT NULL,
-            deleted_at INTEGER
+                deleted_at INTEGER,
+                version    INTEGER NOT NULL DEFAULT 0
          );
          CREATE TABLE IF NOT EXISTS resources (
             id         TEXT PRIMARY KEY NOT NULL,
             name       TEXT NOT NULL,
             category   TEXT NOT NULL,
             min_tier   TEXT NOT NULL,
-            deleted_at INTEGER
+                deleted_at INTEGER,
+                version    INTEGER NOT NULL DEFAULT 0
          );
          -- FIX: indexes for O(log n) personal-history + time-range queries.
          -- Without these, GET /reports/history/{id} and paginated audit/usage
@@ -177,6 +190,22 @@ pub fn open_db(path: &str) -> rusqlite::Result<Connection> {
          CREATE INDEX IF NOT EXISTS idx_usage_passenger ON usage_events(passenger_id);
          CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_events(timestamp);
          CREATE INDEX IF NOT EXISTS idx_admin_timestamp ON admin_events(timestamp);",
+    )?;
+    // FIX: older SQLite files were created before optimistic-concurrency
+    // versions were durable, so CREATE TABLE IF NOT EXISTS alone will not add
+    // the new columns. Add them idempotently so old databases preserve If-Match
+    // protection after upgrade instead of resetting every entity to version 0.
+    ensure_column(
+        &conn,
+        "passengers",
+        "version",
+        "ALTER TABLE passengers ADD COLUMN version INTEGER NOT NULL DEFAULT 0;",
+    )?;
+    ensure_column(
+        &conn,
+        "resources",
+        "version",
+        "ALTER TABLE resources ADD COLUMN version INTEGER NOT NULL DEFAULT 0;",
     )?;
     Ok(conn)
 }
@@ -459,27 +488,28 @@ impl SqliteEntityStore {
         Vec<crate::domain::passenger::Passenger>,
     )> {
         let conn = self.conn.lock().expect("entity store conn mutex poisoned");
-        let mut stmt =
-            conn.prepare("SELECT id, name, tier, deleted_at FROM passengers ORDER BY rowid ASC")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, tier, deleted_at, version FROM passengers ORDER BY rowid ASC",
+        )?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, Option<i64>>(3)?,
+                row.get::<_, u64>(4)?,
             ))
         })?;
         let mut active = Vec::new();
         let mut deleted = Vec::new();
         for row in rows {
-            let (id, name, tier_s, del) = row?;
+            let (id, name, tier_s, del, version) = row?;
             let p = crate::domain::passenger::Passenger {
                 id: crate::domain::passenger::PassengerId(id),
                 name,
                 tier: tier_from_str(&tier_s)?,
                 deleted_at: del.map(crate::domain::timestamp::Timestamp),
-                // FIX: version is in-memory only (not persisted); restore to 0 on load.
-                version: 0,
+                version,
             };
             if p.deleted_at.is_some() {
                 deleted.push(p);
@@ -505,7 +535,7 @@ impl SqliteEntityStore {
     )> {
         let conn = self.conn.lock().expect("entity store conn mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, category, min_tier, deleted_at FROM resources ORDER BY rowid ASC",
+            "SELECT id, name, category, min_tier, deleted_at, version FROM resources ORDER BY rowid ASC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -514,20 +544,20 @@ impl SqliteEntityStore {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, Option<i64>>(4)?,
+                row.get::<_, u64>(5)?,
             ))
         })?;
         let mut active = Vec::new();
         let mut deleted = Vec::new();
         for row in rows {
-            let (id, name, category, min_s, del) = row?;
+            let (id, name, category, min_s, del, version) = row?;
             let r = crate::domain::resource::Resource {
                 id: crate::domain::resource::ResourceId(id),
                 name,
                 category,
                 min_tier: tier_from_str(&min_s)?,
                 deleted_at: del.map(crate::domain::timestamp::Timestamp),
-                // FIX: version is in-memory only (not persisted); restore to 0 on load.
-                version: 0,
+                version,
             };
             if r.deleted_at.is_some() {
                 deleted.push(r);
@@ -570,12 +600,13 @@ impl SqliteEntityStore {
             .expect("sqlite passengers DELETE failed");
         for p in active.iter().chain(deleted.iter()) {
             conn.execute(
-                "INSERT INTO passengers (id, name, tier, deleted_at) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO passengers (id, name, tier, deleted_at, version) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     p.id.0,
                     p.name,
                     tier_to_str(p.tier),
-                    p.deleted_at.map(|t| t.0)
+                    p.deleted_at.map(|t| t.0),
+                    p.version
                 ],
             )
             .expect("sqlite passengers INSERT failed");
@@ -596,8 +627,8 @@ impl SqliteEntityStore {
             .expect("sqlite resources DELETE failed");
         for r in active.iter().chain(deleted.iter()) {
             conn.execute(
-                "INSERT INTO resources (id, name, category, min_tier, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![r.id.0, r.name, r.category, tier_to_str(r.min_tier), r.deleted_at.map(|t| t.0)],
+                "INSERT INTO resources (id, name, category, min_tier, deleted_at, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![r.id.0, r.name, r.category, tier_to_str(r.min_tier), r.deleted_at.map(|t| t.0), r.version],
             )
             .expect("sqlite resources INSERT failed");
         }
@@ -645,12 +676,13 @@ impl SqliteEntityStore {
             .expect("sqlite passengers DELETE failed");
         for p in active_pax.iter().chain(deleted_pax.iter()) {
             conn.execute(
-                "INSERT INTO passengers (id, name, tier, deleted_at) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO passengers (id, name, tier, deleted_at, version) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     p.id.0,
                     p.name,
                     tier_to_str(p.tier),
-                    p.deleted_at.map(|t| t.0)
+                    p.deleted_at.map(|t| t.0),
+                    p.version
                 ],
             )
             .expect("sqlite passengers INSERT failed");
@@ -661,8 +693,8 @@ impl SqliteEntityStore {
             .expect("sqlite resources DELETE failed");
         for r in active_res.iter().chain(deleted_res.iter()) {
             conn.execute(
-                "INSERT INTO resources (id, name, category, min_tier, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![r.id.0, r.name, r.category, tier_to_str(r.min_tier), r.deleted_at.map(|t| t.0)],
+                "INSERT INTO resources (id, name, category, min_tier, deleted_at, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![r.id.0, r.name, r.category, tier_to_str(r.min_tier), r.deleted_at.map(|t| t.0), r.version],
             )
             .expect("sqlite resources INSERT failed");
         }

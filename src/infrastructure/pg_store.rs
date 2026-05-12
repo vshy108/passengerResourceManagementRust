@@ -111,6 +111,18 @@ fn kind_from_str(s: &str) -> Result<TargetKind, sqlx::Error> {
     }
 }
 
+fn version_from_i64(version: i64) -> Result<u64, sqlx::Error> {
+    u64::try_from(version).map_err(|_| {
+        sqlx::Error::Decode(format!("negative optimistic-concurrency version: {version}").into())
+    })
+}
+
+fn version_to_i64(version: u64) -> Result<i64, sqlx::Error> {
+    i64::try_from(version).map_err(|_| {
+        sqlx::Error::Decode(format!("optimistic-concurrency version too large: {version}").into())
+    })
+}
+
 // ---------- PgEntityStore ------------------------------------------------
 
 /// PostgreSQL-backed entity and event store.
@@ -182,9 +194,10 @@ impl PgEntityStore {
     /// # Errors
     /// `sqlx::Error` on query or decode failure.
     pub async fn load_passengers(&self) -> Result<(Vec<Passenger>, Vec<Passenger>), sqlx::Error> {
-        let rows = sqlx::query("SELECT id, name, tier, deleted_at FROM passengers ORDER BY ctid")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows =
+            sqlx::query("SELECT id, name, tier, deleted_at, version FROM passengers ORDER BY ctid")
+                .fetch_all(&self.pool)
+                .await?;
 
         let mut active = Vec::new();
         let mut deleted = Vec::new();
@@ -195,8 +208,7 @@ impl PgEntityStore {
                 name: row.try_get("name")?,
                 tier: tier_from_str(&tier_s)?,
                 deleted_at: row.try_get::<Option<i64>, _>("deleted_at")?.map(Timestamp),
-                // FIX: version is in-memory only (not persisted); restore to 0 on load.
-                version: 0,
+                version: version_from_i64(row.try_get::<i64, _>("version")?)?,
             };
             if p.deleted_at.is_some() {
                 deleted.push(p);
@@ -213,7 +225,7 @@ impl PgEntityStore {
     /// `sqlx::Error` on query or decode failure.
     pub async fn load_resources(&self) -> Result<(Vec<Resource>, Vec<Resource>), sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, name, category, min_tier, deleted_at FROM resources ORDER BY ctid",
+            "SELECT id, name, category, min_tier, deleted_at, version FROM resources ORDER BY ctid",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -228,8 +240,7 @@ impl PgEntityStore {
                 category: row.try_get("category")?,
                 min_tier: tier_from_str(&min_s)?,
                 deleted_at: row.try_get::<Option<i64>, _>("deleted_at")?.map(Timestamp),
-                // FIX: version is in-memory only (not persisted); restore to 0 on load.
-                version: 0,
+                version: version_from_i64(row.try_get::<i64, _>("version")?)?,
             };
             if r.deleted_at.is_some() {
                 deleted.push(r);
@@ -339,13 +350,14 @@ impl PgEntityStore {
             .await?;
         for p in active_pax.iter().chain(deleted_pax.iter()) {
             sqlx::query(
-                "INSERT INTO passengers (id, name, tier, deleted_at) \
-                 VALUES ($1, $2, $3, $4)",
+                "INSERT INTO passengers (id, name, tier, deleted_at, version) \
+                  VALUES ($1, $2, $3, $4, $5)",
             )
             .bind(&p.id.0)
             .bind(&p.name)
             .bind(tier_to_str(p.tier))
             .bind(p.deleted_at.map(|t| t.0))
+            .bind(version_to_i64(p.version)?)
             .execute(&mut *tx)
             .await?;
         }
@@ -356,14 +368,15 @@ impl PgEntityStore {
             .await?;
         for r in active_res.iter().chain(deleted_res.iter()) {
             sqlx::query(
-                "INSERT INTO resources (id, name, category, min_tier, deleted_at) \
-                 VALUES ($1, $2, $3, $4, $5)",
+                "INSERT INTO resources (id, name, category, min_tier, deleted_at, version) \
+                  VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(&r.id.0)
             .bind(&r.name)
             .bind(&r.category)
             .bind(tier_to_str(r.min_tier))
             .bind(r.deleted_at.map(|t| t.0))
+            .bind(version_to_i64(r.version)?)
             .execute(&mut *tx)
             .await?;
         }

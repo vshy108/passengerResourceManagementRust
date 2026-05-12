@@ -76,15 +76,8 @@ and soft delete. Only Crew Leads may mutate passengers.
 
 ## Implementation notes
 
-### PS-N1 — `version` counter is in-memory only (not persisted)
-The optimistic-concurrency `version` field on `Passenger` is incremented
-in-memory on each successful `change_tier` or `soft_delete` call. It is
-**not** written to the SQLite or PostgreSQL entity store; on restart, every
-passenger reloads with `version = 0`.
-
-Consequence: an `If-Match: "N"` check from a client that observed `N > 0`
-before a server restart will succeed with `"0"` after the restart, bypassing
-the conflict guard for that request.
-
-TODO: add a `version INTEGER NOT NULL DEFAULT 0` column to the `passengers`
-table and persist/restore it during `sync_all` / load to close this gap.
+### PS-N1 — `version` counter is persisted
+The optimistic-concurrency `version` field on `Passenger` is incremented on
+each successful `change_tier` or `soft_delete` call. SQLite and PostgreSQL
+entity stores persist and restore this field so an `If-Match: "N"` check keeps
+its conflict-protection semantics across server restarts.
