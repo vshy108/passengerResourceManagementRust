@@ -87,7 +87,11 @@ export function AppShell(): JSX.Element {
           >
             Refresh
           </button>
-          <span className="muted header-token">{token}</span>
+          {/* FIX: redact the token — show only the first 4 chars to prevent
+               shoulder-surfing and reduce XSS token-harvesting surface. */}
+          <span className="muted header-token" title="API token (redacted)">
+            {token ? `${token.slice(0, 4)}…` : ""}
+          </span>
           <button onClick={logout} className="btn-logout">
             Logout
           </button>
