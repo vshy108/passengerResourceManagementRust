@@ -153,15 +153,18 @@ impl EntityStore {
             #[cfg(feature = "postgres")]
             Self::Pg(store) => {
                 tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(store.sync_all(
-                            leads,
-                            active_pax,
-                            deleted_pax,
-                            active_res,
-                            deleted_res,
-                        ))
-                        .expect("postgres entity sync_all failed");
+                    // FIX: Interface code must not panic on persistence errors.
+                    // Log the failure so the process can continue serving boundary errors.
+                    let result = tokio::runtime::Handle::current().block_on(store.sync_all(
+                        leads,
+                        active_pax,
+                        deleted_pax,
+                        active_res,
+                        deleted_res,
+                    ));
+                    if let Err(error) = result {
+                        tracing::error!(%error, "postgres entity sync_all failed");
+                    }
                 });
             }
         }

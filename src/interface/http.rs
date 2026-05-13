@@ -229,10 +229,6 @@ pub fn router(state: AppState) -> Router {
 ///
 /// `rate_limit_burst` — initial token credit before throttling (default 50).
 ///
-/// # Panics
-///
-/// Panics if the `GovernorConfigBuilder` produces an invalid configuration,
-/// i.e. if `rate_limit_rps` is 0.
 pub fn router_with(
     state: AppState,
     cors_origins: CorsOrigins,
@@ -253,6 +249,17 @@ pub fn router_with(
     };
 
     let x_request_id = HeaderName::from_static("x-request-id");
+    // FIX: Interface configuration should not panic on invalid rate-limit input.
+    // Invalid governor settings simply disable the optional middleware at the boundary.
+    let rate_limit_layer = if enable_rate_limit {
+        GovernorConfigBuilder::default()
+            .per_second(rate_limit_rps)
+            .burst_size(rate_limit_burst)
+            .finish()
+            .map(|config| GovernorLayer::new(std::sync::Arc::new(config)))
+    } else {
+        None
+    };
 
     // Builder-style chain. Each `.route(...)` returns a new Router with
     // one more endpoint registered. `Router::new()` starts empty.
@@ -327,17 +334,7 @@ pub fn router_with(
         // `burst_size(burst)` = initial credit for short legitimate bursts.
         // Disabled in tests: in-process requests all share the same loopback IP,
         // which would exhaust the token bucket and cause spurious test failures.
-        .layer(tower::util::option_layer(if enable_rate_limit {
-            Some(GovernorLayer::new(std::sync::Arc::new(
-                GovernorConfigBuilder::default()
-                    .per_second(rate_limit_rps)
-                    .burst_size(rate_limit_burst)
-                    .finish()
-                    .expect("valid governor config (rps must be non-zero)"),
-            )))
-        } else {
-            None
-        }))
+        .layer(tower::util::option_layer(rate_limit_layer))
         // `.layer(...)` wraps the entire router in a middleware. Layers
         // run in REVERSE registration order on the request side and in
         // declaration order on the response side (tower convention).
@@ -429,6 +426,20 @@ fn bad_request(msg: &str) -> Response {
         .into_response()
 }
 
+/// Return a 500 Internal Server Error response for boundary failures.
+fn internal_error(msg: &str) -> Response {
+    // FIX: Interface serialization/configuration failures were previously handled
+    // with expect(), which panicked instead of returning an HTTP error response.
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorBody {
+            error: msg.to_owned(),
+            code: ErrorCode::InternalError,
+        }),
+    )
+        .into_response()
+}
+
 /// Return a 412 Precondition Failed response for If-Match version mismatches.
 fn version_conflict() -> Response {
     (
@@ -456,19 +467,18 @@ fn parse_if_match(headers: &axum::http::HeaderMap) -> Option<u64> {
 /// Collects data under brief per-aggregate read locks, releases all locks,
 /// then calls `sync_all` outside any lock — so I/O never blocks other handlers.
 ///
-/// # Panics
-/// Panics if any `RwLock` is poisoned or any `SQLite` write fails (a divergence
-/// between in-memory and persistent state is unrecoverable, so crashing is correct).
 fn flush_to_db(state: &AppState) {
     let Some(store) = &state.world.entity_store else {
         return;
     };
     // Collect under brief, sequentially-released read locks.
+    // FIX: Interface code must not panic on poisoned locks; recover the inner
+    // guard so the boundary can keep returning HTTP responses instead of crashing.
     let leads = state
         .world
         .crew_leads
         .read()
-        .expect("crew_leads rwlock poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .list()
         .to_vec();
     let (active_pax, deleted_pax) = {
@@ -476,7 +486,7 @@ fn flush_to_db(state: &AppState) {
             .world
             .passengers
             .read()
-            .expect("passengers rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         (pax.list().to_vec(), pax.deleted().to_vec())
     };
     let (active_res, deleted_res) = {
@@ -484,7 +494,7 @@ fn flush_to_db(state: &AppState) {
             .world
             .resources
             .read()
-            .expect("resources rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         (res.list().to_vec(), res.deleted().to_vec())
     };
     // FIX: sync_all wraps all three entity tables in a single BEGIN IMMEDIATE /
@@ -650,32 +660,36 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
         .world
         .crew_leads
         .read()
-        .expect("crew_leads rwlock poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .list()
         .len();
     let passengers = state
         .world
         .passengers
         .read()
-        .expect("passengers rwlock poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .list()
         .len();
     let resources = state
         .world
         .resources
         .read()
-        .expect("resources rwlock poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .list()
         .len();
     let admin = state
         .world
         .audit_sink
         .read()
-        .expect("audit_sink rwlock poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .snapshot()
         .len();
     let (usage_total, allowed, denied) = {
-        let access = state.world.access.read().expect("access rwlock poisoned");
+        let access = state
+            .world
+            .access
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let usage = access.sink().list();
         (
             usage.len(),
@@ -732,7 +746,7 @@ async fn list_crew_leads(
         .world
         .crew_leads
         .read()
-        .expect("crew_leads rwlock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     Json(
         crew_leads
             .list()
@@ -766,7 +780,7 @@ async fn replace_crew_lead(
             .world
             .crew_leads
             .write()
-            .expect("crew_leads rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         crew_leads.replace_audited(
             &CrewLeadId(actor_id.clone()),
             &CrewLeadId(old_id.clone()),
@@ -795,7 +809,7 @@ async fn list_passengers(
         .world
         .passengers
         .read()
-        .expect("passengers rwlock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let items: Vec<PassengerDto> = if filter.include_deleted() {
         // Include soft-deleted records. active first, then deleted (stable order).
         passengers
@@ -851,7 +865,7 @@ async fn create_passenger(
             .world
             .passengers
             .write()
-            .expect("passengers rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         passengers.create(&actor, PassengerId(req.id), req.name, Tier::from(req.tier))
     }; // write lock released before flush
     match result {
@@ -859,7 +873,9 @@ async fn create_passenger(
             flush_to_db(&state);
             tracing::info!(passenger_id = %p.id.0, tier = ?p.tier, actor = %actor_id, "passenger created");
             let dto = PassengerDto::from(&p);
-            let body = serde_json::to_vec(&dto).expect("PassengerDto serialization is infallible");
+            let Ok(body) = serde_json::to_vec(&dto) else {
+                return internal_error("failed to serialize passenger response");
+            };
             if let Some(key) = scoped_key {
                 idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body));
             }
@@ -890,7 +906,7 @@ async fn change_passenger_tier(
             .world
             .passengers
             .write()
-            .expect("passengers rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Optimistic concurrency check: If-Match version must match current version.
         // Performed inside the write lock so the check + mutation are atomic.
         if let (Some(ev), Ok(p)) = (
@@ -932,7 +948,7 @@ async fn soft_delete_passenger(
             .world
             .passengers
             .write()
-            .expect("passengers rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Optimistic concurrency check inside the write lock.
         if let (Some(ev), Ok(p)) = (
             parse_if_match(&headers),
@@ -965,7 +981,7 @@ async fn list_resources(
         .world
         .resources
         .read()
-        .expect("resources rwlock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let items: Vec<ResourceDto> = if filter.include_deleted() {
         resources
             .list()
@@ -1020,7 +1036,7 @@ async fn create_resource(
             .world
             .resources
             .write()
-            .expect("resources rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         resources.create(
             &actor,
             ResourceId(req.id),
@@ -1034,7 +1050,9 @@ async fn create_resource(
             flush_to_db(&state);
             tracing::info!(resource_id = %r.id.0, min_tier = ?r.min_tier, actor = %actor_id, "resource created");
             let dto = ResourceDto::from(&r);
-            let body = serde_json::to_vec(&dto).expect("ResourceDto serialization is infallible");
+            let Ok(body) = serde_json::to_vec(&dto) else {
+                return internal_error("failed to serialize resource response");
+            };
             if let Some(key) = scoped_key {
                 idempotency_put(&state, key, StatusCode::CREATED, Bytes::from(body));
             }
@@ -1065,7 +1083,7 @@ async fn change_resource_min_tier(
             .world
             .resources
             .write()
-            .expect("resources rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Optimistic concurrency check inside the write lock.
         if let (Some(ev), Ok(r)) = (
             parse_if_match(&headers),
@@ -1106,7 +1124,7 @@ async fn soft_delete_resource(
             .world
             .resources
             .write()
-            .expect("resources rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Optimistic concurrency check inside the write lock.
         if let (Some(ev), Ok(r)) = (
             parse_if_match(&headers),
@@ -1150,13 +1168,17 @@ async fn use_resource(
         .world
         .passengers
         .read()
-        .expect("passengers rwlock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let resources = state
         .world
         .resources
         .read()
-        .expect("resources rwlock poisoned");
-    let mut access = state.world.access.write().expect("access rwlock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut access = state
+        .world
+        .access
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     match access.use_resource(
         &actor,
         &*passengers,
@@ -1187,7 +1209,7 @@ async fn list_admin_events(
         .world
         .audit_sink
         .read()
-        .expect("audit_sink rwlock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     // Use snapshot_with_hashes so each DTO carries its chain hash.
     let with_hashes = audit_sink.snapshot_with_hashes();
     Json(
@@ -1212,7 +1234,7 @@ async fn verify_audit_chain(State(state): State<AppState>) -> Json<AuditVerifyDt
         .world
         .audit_sink
         .read()
-        .expect("audit_sink rwlock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let with_hashes = audit_sink.snapshot_with_hashes();
     let length = with_hashes.len();
     // FIX: The sink uses the literal string "genesis" as the first prev_hash
@@ -1264,7 +1286,11 @@ async fn list_usage_events(
     Query(page): Query<PaginationQuery>,
 ) -> Json<Vec<UsageEventDto>> {
     use crate::application::ports::UsageEventSource;
-    let access = state.world.access.read().expect("access rwlock poisoned");
+    let access = state
+        .world
+        .access
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     Json(
         access
             .sink()
@@ -1281,7 +1307,11 @@ async fn list_usage_events(
     responses((status = 200, body = Vec<TierCountsDto>)))]
 async fn report_by_tier(State(state): State<AppState>) -> Json<Vec<TierCountsDto>> {
     use crate::application::reporting_service::ReportingService;
-    let access = state.world.access.read().expect("access rwlock poisoned");
+    let access = state
+        .world
+        .access
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let report = ReportingService::new(access.sink()).aggregate_by_tier();
     let mut rows: Vec<TierCountsDto> = report
         .into_iter()
@@ -1308,7 +1338,11 @@ async fn report_top_resources(
     Query(q): Query<TopNQuery>,
 ) -> Json<Vec<TopResourceDto>> {
     use crate::application::reporting_service::ReportingService;
-    let access = state.world.access.read().expect("access rwlock poisoned");
+    let access = state
+        .world
+        .access
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let n = q.n();
     Json(
         ReportingService::new(access.sink())
@@ -1330,7 +1364,11 @@ async fn report_personal_history(
     Path(passenger_id): Path<String>,
 ) -> Json<Vec<UsageEventDto>> {
     use crate::application::reporting_service::ReportingService;
-    let access = state.world.access.read().expect("access rwlock poisoned");
+    let access = state
+        .world
+        .access
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     Json(
         ReportingService::new(access.sink())
             .personal_history(&PassengerId(passenger_id))
@@ -1358,7 +1396,7 @@ async fn add_crew_lead(
             .world
             .crew_leads
             .write()
-            .expect("crew_leads rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         crew_leads.add(req.lead.into())
     };
     match result {
@@ -1387,7 +1425,7 @@ async fn remove_crew_lead(
             .world
             .crew_leads
             .write()
-            .expect("crew_leads rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         crew_leads.remove(&CrewLeadId(id.clone()))
     };
     match result {
@@ -1408,7 +1446,7 @@ async fn get_passenger(State(state): State<AppState>, Path(id): Path<String>) ->
         .world
         .passengers
         .read()
-        .expect("passengers rwlock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     match passengers.get(&PassengerId(id)) {
         Ok(p) => {
             let etag = format!(r#""{}""#, p.version);
@@ -1433,7 +1471,7 @@ async fn get_resource(State(state): State<AppState>, Path(id): Path<String>) -> 
         .world
         .resources
         .read()
-        .expect("resources rwlock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     match resources.get(&ResourceId(id)) {
         Ok(r) => {
             let etag = format!(r#""{}""#, r.version);
@@ -1460,7 +1498,7 @@ async fn list_accessible_resources(
         .world
         .resources
         .read()
-        .expect("resources rwlock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     Json(
         resources
             .list_accessible_for(Tier::from(q.tier))
@@ -1479,7 +1517,7 @@ async fn reset_world(State(state): State<AppState>, AuthActor(actor_id): AuthAct
             .world
             .crew_leads
             .read()
-            .expect("crew_leads rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let id = CrewLeadId(actor_id.clone());
         if !crew_leads.list().iter().any(|c| c.id == id) {
             return err_response_owned(&DomainError::UnauthorizedActor);
@@ -1508,23 +1546,27 @@ async fn reset_world(State(state): State<AppState>, AuthActor(actor_id): AuthAct
             .world
             .crew_leads
             .write()
-            .expect("crew_leads rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut pax = state
             .world
             .passengers
             .write()
-            .expect("passengers rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut res = state
             .world
             .resources
             .write()
-            .expect("resources rwlock poisoned");
-        let mut acc = state.world.access.write().expect("access rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut acc = state
+            .world
+            .access
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut aud = state
             .world
             .audit_sink
             .write()
-            .expect("audit_sink rwlock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *cl = new_cl;
         *pax = new_pax;
         *res = new_res;
