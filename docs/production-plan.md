@@ -1,5 +1,8 @@
 # Production Gap Plan — PRMS
 
+> **Status (2026-05-14): All items below are complete.**
+> This document is a historical record of the production-readiness work.
+
 Baseline: 148 tests passing, `cargo clippy` clean, RwLock + rate-limit + SQLite
 persistence committed (commits up to `b43c839`).
 
@@ -25,7 +28,7 @@ production.
 **Files:** `src/infrastructure/system_clock.rs` (new), `src/infrastructure/mod.rs`,
 `src/interface/composition_root.rs`.
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -44,7 +47,7 @@ show old state).
 **Files:** `src/infrastructure/sqlite_event_store.rs`,
 `src/interface/composition_root.rs`.
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -62,7 +65,7 @@ enumerate which token prefixes are valid.
 
 **Files:** `Cargo.toml`, `src/interface/http.rs` (`FromRequestParts` for `AuthActor`).
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -81,7 +84,7 @@ panics rather than retrying.
 
 **Files:** `src/infrastructure/sqlite_event_store.rs` (`open_db()`).
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -98,7 +101,7 @@ PRs can introduce pedantic violations that pass CI but fail locally.
 
 **Files:** `.github/workflows/ci.yml`.
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -115,7 +118,7 @@ fields. You cannot query logs by `passenger_id`, `resource_id`, or `actor_id`.
 
 **Files:** `src/interface/http.rs` (8–10 handler functions).
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -134,7 +137,7 @@ fields. You cannot query logs by `passenger_id`, `resource_id`, or `actor_id`.
 
 **Files:** `src/infrastructure/sqlite_event_store.rs` (`open_db()`).
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -152,7 +155,7 @@ cross-origin data leaks are unmitigated.
 
 **Files:** `src/interface/http.rs` (`router_with()`). No new dependencies.
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -170,7 +173,7 @@ probe on this endpoint would not catch a dead database.
 **Files:** `src/interface/http.rs`, `src/infrastructure/sqlite_event_store.rs`,
 `src/interface/composition_root.rs`.
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -187,7 +190,7 @@ DTO field change would pass all 148 unit/integration tests but break the fronten
 
 **Files:** `.github/workflows/ci.yml`.
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -203,7 +206,7 @@ DTO field change would pass all 148 unit/integration tests but break the fronten
 
 **Files:** `docker-compose.yml`, `Caddyfile` (new), `README.md`.
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 
@@ -223,7 +226,7 @@ connection drops before the client receives 201, the client retries and gets
 **Files:** `src/interface/http.rs`, `src/infrastructure/sqlite_event_store.rs`,
 `src/interface/composition_root.rs`.
 
-**Status:** [ ] not started
+**Status:** [x] done
 
 ---
 

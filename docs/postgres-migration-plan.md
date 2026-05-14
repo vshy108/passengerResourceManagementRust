@@ -1,5 +1,7 @@
 # PostgreSQL Migration Plan — PRMS
 
+> **Status (2026-05-14): Phases 1–3 are complete. Phase 4 (full async per-request SQL) remains future work.**
+
 **Goal**: Eliminate the global `Arc<RwLock<World>>` write-lock bottleneck so
 concurrent writes to different aggregates proceed without serialization, and lay
 a foundation for a fully PostgreSQL-backed future architecture.

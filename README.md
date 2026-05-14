@@ -83,30 +83,7 @@ cargo run --features http --bin serve
 
 ### API endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Liveness check |
-| `GET` | `/openapi.json` | Full OpenAPI 3.x spec |
-| `GET` | `/crew-leads` | List all Crew Leads |
-| `POST` | `/crew-leads` | Add a Crew Lead (**always 409** — cap of 3 is full at boot, use PUT to rotate) |
-| `PUT` | `/crew-leads/{id}` | Replace a Crew Lead (count stays 3) |
-| `DELETE` | `/crew-leads/{id}` | Remove a Crew Lead (**always 409** — use PUT to rotate) |
-| `GET` | `/passengers` | List active passengers |
-| `POST` | `/passengers` | Create a passenger (Crew Lead only) |
-| `DELETE` | `/passengers/{id}` | Soft-delete a passenger (Crew Lead only) |
-| `PATCH` | `/passengers/{id}/tier` | Change a passenger's tier (Crew Lead only) |
-| `GET` | `/resources` | List active resources |
-| `POST` | `/resources` | Create a resource (Crew Lead only) |
-| `DELETE` | `/resources/{id}` | Soft-delete a resource (Crew Lead only) |
-| `PATCH` | `/resources/{id}/min-tier` | Change a resource's min tier (Crew Lead only) |
-| `GET` | `/resources/accessible` | List resources accessible to the caller's tier |
-| `POST` | `/access` | Attempt to use a resource (Passenger only) |
-| `GET` | `/audit` | List all `AdminEvent`s |
-| `GET` | `/usage` | List all `UsageEvent`s |
-| `GET` | `/reports/by-tier` | Aggregate usage counts by passenger tier |
-| `GET` | `/reports/top-resources` | Top-N resources by allowed-use count |
-| `GET` | `/reports/history/{id}` | Personal usage history for a passenger |
-| `POST` | `/reset` | Reset in-memory state — only registered when `PRMS_ENABLE_RESET=true` |
+See the [full endpoint reference](#endpoints) below or [`docs/api-examples.md`](./docs/api-examples.md) for copy-paste `curl` examples covering all 28 endpoints.
 
 State resets on restart in demo mode (no `PRMS_DB_PATH`); set `PRMS_DB_PATH` for event and entity persistence. Quick smoke test (requires `PRMS_API_KEYS` — see below):
 
@@ -166,7 +143,7 @@ and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
 | GET    | `/crew-leads`                     | list crew leads                      |
 | POST   | `/crew-leads`                     | add crew lead (always 409, capped)   |
 | PUT    | `/crew-leads/:old_id`             | replace crew lead                    |
-| DELETE | `/crew-leads/:id`                 | remove crew lead (409 if at minimum) |
+| DELETE | `/crew-leads/:id`                 | remove crew lead (always 409 — use PUT to rotate) |
 | GET    | `/passengers`                     | list active passengers               |
 | POST   | `/passengers`                     | create passenger                     |
 | GET    | `/passengers/:id`                 | fetch one (incl. deleted)            |

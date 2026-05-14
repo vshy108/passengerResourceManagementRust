@@ -51,16 +51,22 @@ responses.
 
 ## Rate limiting
 
-Rate limiting is **opt-in** via `--enable-rate-limit` / `PRMS_ENABLE_RATE_LIMIT`.
-It is disabled by default to avoid IP-bucket exhaustion when all requests come
-from the same loopback address (tests, Docker single-host deployments).
-
-Enable in production:
+Rate limiting is **enabled by default** (`PRMS_ENABLE_RATE_LIMIT=true`).
+Set it to `false` for local dev or integration tests where all requests share
+the loopback IP and would exhaust the token bucket immediately:
 
 ```sh
+# Local dev — disable rate limiting
 cargo run --features http --bin serve -- \
   --api-keys '...' \
-  --enable-rate-limit \
+  --enable-rate-limit=false
+
+# Or via dev.env (already sets PRMS_ENABLE_RATE_LIMIT=false)
+env $(grep -v '^#' dev.env | xargs) cargo run --features http --bin serve -- --enable-reset
+
+# Production — keep the default (or tune thresholds)
+cargo run --features http --bin serve -- \
+  --api-keys '...' \
   --rate-limit-rps 10 \
   --rate-limit-burst 50
 ```

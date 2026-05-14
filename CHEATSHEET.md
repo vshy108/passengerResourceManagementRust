@@ -16,9 +16,15 @@ cargo llvm-cov nextest --features http --ignore-filename-regex 'src/bin/'
 Run the HTTP server:
 
 ```sh
+# Recommended: use dev.env (sets API keys, disables rate limiting, sets CORS)
+env $(grep -v '^#' dev.env | xargs) \
+  cargo run --features http --bin serve -- --enable-reset
+
+# Or inline:
 cargo run --features http --bin serve -- \
-  --api-keys 'cl-aria-token:cl-aria,ps-001-token:ps-001' \
-  --enable-reset
+  --api-keys 'cl-aria:cl-aria,ps-001:ps-001' \
+  --enable-reset \
+  --enable-rate-limit=false
 ```
 
 ## Domain Rules
@@ -46,15 +52,19 @@ interface -> application -> domain
 
 ## HTTP Flags
 
-| Flag | Env | Purpose |
-|---|---|---|
-| `--bind` | `PRMS_BIND` | Listen address |
-| `--cors-origins` | `PRMS_CORS_ORIGINS` | CORS allow-list |
-| `--enable-reset` | `PRMS_ENABLE_RESET` | Register `/reset` |
-| `--api-keys` | `PRMS_API_KEYS` | `token:actor-id` pairs |
-| `--db-path` | `PRMS_DB_PATH` | SQLite persistence path |
-| `--pg-url` | `PRMS_PG_URL` | PostgreSQL URL with `postgres` feature |
-| `--log-format` | `PRMS_LOG_FORMAT` | `text` or `json` logs |
+| Flag | Env | Default | Purpose |
+|---|---|---|---|
+| `--bind` | `PRMS_BIND` | `127.0.0.1:8080` | Listen address |
+| `--cors-origins` | `PRMS_CORS_ORIGINS` | any | CORS allow-list |
+| `--enable-reset` | `PRMS_ENABLE_RESET` | `false` | Register `/reset` |
+| `--api-keys` | `PRMS_API_KEYS` | — (all 401) | `token:actor-id` pairs |
+| `--db-path` | `PRMS_DB_PATH` | — (in-memory) | SQLite persistence path |
+| `--pg-url` | `PRMS_PG_URL` | — | PostgreSQL URL (`postgres` feature) |
+| `--enable-rate-limit` | `PRMS_ENABLE_RATE_LIMIT` | `true` | Per-IP token-bucket rate limiting |
+| `--rate-limit-rps` | `PRMS_RATE_LIMIT_RPS` | `10` | Tokens replenished per second per IP |
+| `--rate-limit-burst` | `PRMS_RATE_LIMIT_BURST` | `50` | Initial token burst per IP |
+| `--shutdown-grace-secs` | `PRMS_SHUTDOWN_GRACE_SECS` | `10` | Drain timeout after SIGINT |
+| `--log-format` | `PRMS_LOG_FORMAT` | `text` | `text` or `json` structured logs |
 
 ## Review Gates
 
@@ -64,3 +74,14 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo nextest run --all-features
 cd web && npm ci && npm run build
 ```
+
+## Reference Docs
+
+| Doc | What it covers |
+|---|---|
+| [`docs/api-examples.md`](docs/api-examples.md) | Copy-paste `curl` for every endpoint |
+| [`docs/persistence-matrix.md`](docs/persistence-matrix.md) | In-memory vs SQLite vs PostgreSQL |
+| [`docs/observability.md`](docs/observability.md) | Logs, request-id, metrics, audit |
+| [`docs/security-review.md`](docs/security-review.md) | Rate limits, CORS, headers, auth |
+| [`docs/web-reviewer-flow.md`](docs/web-reviewer-flow.md) | Rust API + React thin client together |
+| [`docs/code-review-qa.md`](docs/code-review-qa.md) | Design Q&A for code reviewers |
