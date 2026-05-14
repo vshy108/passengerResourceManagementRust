@@ -144,6 +144,74 @@ A: Derived `PartialOrd` on enums uses declaration order. If someone reorders the
 
 ---
 
+**Q: [EXTENSIBILITY] Adding a new tier currently requires changes in 7 spots across 3 files. Is there a better approach?**
+
+A: Yes — and the right fix has two independent parts with different tradeoff profiles.
+
+**Part 1 — domain `tier.rs` (3 spots → 1): `define_tiers!` macro (high value, high cost)**
+
+A `macro_rules!` macro can generate the enum, `rank()`, `TryFrom<&str>`, and a new `as_str()` method from a single table:
+
+```rust
+macro_rules! define_tiers {
+    ( $( ($name:ident, $rank:expr) ),* $(,)? ) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum Tier { $( $name, )* }
+
+        impl Tier {
+            pub fn rank(self) -> u8 { match self { $( Tier::$name => $rank, )* } }
+            pub fn as_str(self) -> &'static str { match self { $( Tier::$name => stringify!($name), )* } }
+            pub const ALL: &'static [Tier] = &[ $( Tier::$name, )* ];
+        }
+
+        impl TryFrom<&str> for Tier {
+            type Error = InvalidTier;
+            fn try_from(value: &str) -> Result<Self, Self::Error> {
+                match value { $( stringify!($name) => Ok(Tier::$name), )* _ => Err(InvalidTier(value.to_owned())) }
+            }
+        }
+    };
+}
+
+define_tiers! { (Silver, 1), (Gold, 2), (Diamond, 3), (Platinum, 4) }
+```
+
+Adding a tier becomes one line. The compiler still enforces exhaustiveness inside the macro-generated matches.
+
+**Tradeoffs:** IDE "go to definition" degrades (lands on the macro call, not a clear line). Compile errors inside the expansion point at the call site. For a learning repo the verbosity of explicit code is more valuable — a reader can understand `enum Tier { Silver, Gold, ... }` without knowing `macro_rules!`. Reserve this for a production monorepo with many contributors and frequent tier changes.
+
+**Part 2 — infrastructure stores (2 spots each → 0): `as_str()` delegation (high value, low cost)**
+
+The `tier_to_str` / `tier_from_str` helpers in `pg_store.rs` and `sqlite_event_store.rs` hold match arms that the compiler does NOT check (they're string comparisons, not exhaustive pattern matches on the enum). Adding a tier without updating them causes a silent runtime error.
+
+Fix by adding `as_str()` to the plain domain enum (no macro needed) and delegating from both stores:
+
+```rust
+// domain/tier.rs — add one method, keep everything else explicit
+pub fn as_str(self) -> &'static str {
+    // Reuse TIER_NAMES — no second match to maintain.
+    TIER_NAMES
+        .iter()
+        .find(|(_, t)| *t == self)
+        .map(|(name, _)| *name)
+        .expect("TIER_NAMES covers all variants")
+}
+```
+
+```rust
+// infrastructure/pg_store.rs and sqlite_event_store.rs — replace match bodies
+fn tier_to_str(t: Tier) -> &'static str { t.as_str() }
+fn tier_from_str(s: &str) -> rusqlite::Result<Tier> {
+    Tier::try_from(s).map_err(|e| rusqlite::Error::InvalidColumnName(e.0))
+}
+```
+
+After this, adding a tier updates only `tier.rs` (3 spots, all compiler-guided) and `dto.rs` (the wire DTO, which is intentionally separate). The infrastructure stores need zero changes.
+
+**Recommendation:** Apply Part 2 only. It eliminates the silent-failure risk with a three-line change and zero cognitive overhead. Part 1 is available if the team later decides the single-source-of-truth benefit justifies the macro complexity.
+
+---
+
 **Q: Why are `PassengerId`, `ResourceId`, and `CrewLeadId` newtypes rather than plain `String`?**
 
 A: Newtypes make IDs incompatible at the type level. Passing a `ResourceId` where a `PassengerId` is expected is a compile error, not a silent bug. In a handler that receives three different IDs in the same request, this prevents argument-order mistakes that would otherwise only surface at runtime. The cost is wrapping/unwrapping via `.0`, which has zero runtime overhead.
