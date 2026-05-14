@@ -28,6 +28,6 @@ This plan tracks future PRMS Rust slices. Keep changes vertical, spec-backed, an
 
 ## S5 — Security Hardening Review
 
-- [ ] Review rate limits, API key parsing, CORS configuration, body limits, and security headers as one slice.
-- [ ] Add tests for any missing boundary cases before changing code.
-- [ ] Verify with: `cargo clippy --all-targets --all-features -- -D warnings` and `cargo nextest run --features http`.
+- [x] Review rate limits, API key parsing, CORS configuration, body limits, and security headers as one slice.
+- [x] Add tests for any missing boundary cases before changing code.
+- [x] Verify with: `cargo clippy --all-targets --all-features -- -D warnings` and `cargo nextest run --features http`.
