@@ -1,7 +1,7 @@
 # Code Review Q&A — Spaceship X26 PRMS
 
 > Reference codebase: `passengerResourceManagementRust` (Rust 2024, stable)
-> Last updated: 2026-05-07
+> Last updated: 2026-05-14
 
 ---
 
@@ -339,7 +339,7 @@ A: Returning a reference avoids a heap allocation (cloning the inner `String`) w
 
 ## 5. Infrastructure Layer
 
-Related files: [src/infrastructure/fake_clock.rs](../src/infrastructure/fake_clock.rs), [src/infrastructure/in_memory_usage_event_sink.rs](../src/infrastructure/in_memory_usage_event_sink.rs), [src/infrastructure/in_memory_admin_event_sink.rs](../src/infrastructure/in_memory_admin_event_sink.rs)
+Related files: [src/infrastructure/fake_clock.rs](../src/infrastructure/fake_clock.rs), [src/infrastructure/system_clock.rs](../src/infrastructure/system_clock.rs), [src/infrastructure/in_memory_usage_event_sink.rs](../src/infrastructure/in_memory_usage_event_sink.rs), [src/infrastructure/in_memory_admin_event_sink.rs](../src/infrastructure/in_memory_admin_event_sink.rs), [src/infrastructure/sqlite_event_store.rs](../src/infrastructure/sqlite_event_store.rs), [src/infrastructure/pg_store.rs](../src/infrastructure/pg_store.rs)
 
 **Q: `FakeClock` uses `AtomicI64` with `Ordering::Relaxed`. Why `Relaxed` and not `SeqCst`?**
 
@@ -359,9 +359,37 @@ A: Yes, per AGENTS.md §3 and the inline doc comment. Mutex poisoning occurs whe
 
 ---
 
-**Q: The infrastructure layer only has three files. Where would you put a JSON file-backed repository?**
+**Q: Where would you put a new persistence adapter (e.g. a JSON file-backed repository)?**
 
 A: Add `src/infrastructure/json_file_repo.rs` with a struct (e.g., `JsonFilePassengerRepo`) that implements the relevant port traits. No other layer changes. The composition root in `src/interface/composition_root.rs` would be updated to construct and inject the JSON-backed repo. The application and domain layers are untouched — this is the intended extension point.
+
+---
+
+**Q: `SqliteEventStore` uses `rusqlite`. Why `rusqlite` and not `sqlx` for SQLite?**
+
+A: `rusqlite` is a synchronous, low-overhead binding. The infrastructure layer accesses SQLite on the handler thread (inside the Mutex critical section) so async I/O would gain nothing — the lock is already held while waiting. `sqlx` is async-first and adds compile-time query checking that requires a live DB during `cargo build`; `rusqlite` is simpler for the sync write-through model. The `busy_timeout` pragma is set so concurrent writes park rather than immediately returning `SQLITE_BUSY`.
+
+---
+
+**Q: What SQLite pragmas does `SqliteEventStore` set on open, and why?**
+
+A:
+- `PRAGMA journal_mode=WAL` — enables Write-Ahead Logging. WAL allows concurrent readers while a write is in progress; the default `DELETE` journal would block all reads during a write.
+- `PRAGMA synchronous=NORMAL` — fsync on every WAL checkpoint rather than every write; a good durability/performance trade-off on local storage.
+- `PRAGMA busy_timeout=5000` — if another connection holds a write lock, retry for up to 5 000 ms before returning `SQLITE_BUSY`. Without this, two simultaneous writes could immediately return an error.
+- `PRAGMA foreign_keys=ON` — enforces referential integrity on tables that reference each other.
+
+---
+
+**Q: `PgStore` uses `sqlx` with `PgPool`. What is a connection pool and why not open a new connection per request?**
+
+A: A connection pool is a bounded set of pre-opened database connections shared across requests. Opening a PostgreSQL connection involves a TCP handshake, authentication, and session initialisation — typically 20–100 ms. Reusing a pool connection costs only a checkout from a queue (microseconds). `PgPool` in `sqlx` handles connection lifecycle, max-size limits, and health checks automatically.
+
+---
+
+**Q: `SystemClock` is the production clock adapter. What separates it from `FakeClock` at the type level?**
+
+A: Both implement the `Clock` port trait (`fn now(&self) -> Timestamp`). `SystemClock` calls `std::time::SystemTime::now()` and converts to nanoseconds since epoch. `FakeClock` holds an `AtomicI64` that increments on each call. The composition root in `serve.rs` constructs a `SystemClock` for the live server; tests construct `FakeClock::starting_at(0)`. No caller ever sees the concrete type — only the trait — so swapping is a single-line change in the composition root.
 
 ---
 
@@ -510,7 +538,9 @@ Related files: [src/interface/http.rs](../src/interface/http.rs), [src/interface
 
 **Q: The entire `World` is behind a single `Mutex`. What are the concurrency implications?**
 
-A: All mutations are serialised: at any instant only one handler is running business logic. This is correct for an in-memory, demo-scope system — it avoids data races with the simplest possible implementation. The trade-off is throughput under concurrent load: every request waits for the lock, making the server effectively single-threaded. Addressing this would require per-aggregate locks (one `Mutex` per service) or an actor-model message-passing architecture, both of which are out of scope per AGENTS.md §8.
+A: All mutations are serialised: at any instant only one handler is running business logic. This is correct for an in-memory, demo-scope system — it avoids data races with the simplest possible implementation. The trade-off is throughput under concurrent load: every request waits for the lock, making the server effectively single-threaded.
+
+The PostgreSQL backend path moves beyond this: `WorldShards` replaces the single `Arc<Mutex<World>>` with per-aggregate `RwLock` fields — one per service type. Read-heavy endpoints (e.g. `GET /passengers` while `POST /resources` is in flight) no longer block each other. A documented lock-acquisition order (passengers → resources → access → reporting) prevents deadlocks. See [`docs/postgres-migration-plan.md`](postgres-migration-plan.md) for the full design.
 
 ---
 
@@ -974,14 +1004,20 @@ A: Every log line emitted by a handler should include the request ID in the stru
 
 ---
 
-**Q: What is missing from the current observability setup that you would add before going to production?**
+**Q: What observability features are already in the production build?**
 
-A: Several things:
-1. **Metrics** — request count, latency (p50/p95/p99), error rate per endpoint. Prometheus + a `/metrics` endpoint is the standard Rust approach (`metrics` crate + `axum-prometheus`).
-2. **Structured logging with severity** — `tracing` is set up, but production logs should include service name, version, environment, and structured fields (not just a human-readable string).
-3. **Distributed tracing** — OpenTelemetry spans to trace a request from the frontend through the Rust server (useful when services are split across processes).
-4. **Health check depth** — the current `/health` returns `"ok"` unconditionally. A production health check would verify that all dependencies (database, etc.) are reachable.
-5. **Alerting thresholds** — define SLOs (e.g., p99 latency < 200 ms, error rate < 0.1%) and alert when they are breached.
+A:
+1. **Prometheus metrics** (`GET /metrics`) — gauges for crew-lead/passenger/resource counts; counters for usage events (allowed vs denied) and admin events. Scraped directly by Prometheus or compatible agents.
+2. **Readiness probe** (`GET /health/ready`) — returns JSON with entity counts, a DB liveness ping result, and 503 if any lock is poisoned. Distinct from `GET /health` (liveness only).
+3. **Request ID tracing** — `x-request-id` UUID on every request/response; propagated into `tracing::Span` so log lines are correlated.
+4. **Structured logging** — `--log-format json` emits newline-delimited JSON suitable for Loki, Datadog, or CloudWatch ingestion.
+
+**Q: What observability is still absent for a full production setup?**
+
+A:
+1. **Latency histograms** — the current `/metrics` tracks counts, not latency distributions (p50/p95/p99). `axum-prometheus` or manual `Histogram` instruments would fill this gap.
+2. **Distributed tracing** — OpenTelemetry spans to propagate trace context from the React frontend through the Rust server to the database.
+3. **Alerting thresholds** — SLO definitions (e.g., p99 < 200 ms, error rate < 0.1%) backed by alertmanager rules.
 
 ---
 
@@ -2009,9 +2045,9 @@ A: No. Production APIs should return generic 500 messages and log internal detai
 
 ---
 
-**Q: How would you add rate limiting?**
+**Q: How does rate limiting work in this codebase?**
 
-A: Add middleware in the interface layer, likely keyed by authenticated identity or IP address. It should sit before handlers and not affect domain/application code.
+A: Per-IP token-bucket rate limiting is implemented via `tower-governor` and wired in `serve.rs` before the router. The defaults are 10 tokens replenished per second (`--rate-limit-rps`) with a burst of 50 (`--rate-limit-burst`). It is **enabled by default** (`PRMS_ENABLE_RATE_LIMIT=true`) and must be explicitly disabled in integration tests (`PRMS_ENABLE_RATE_LIMIT=false`) because all test requests share the loopback IP and would exhaust the token bucket within seconds. The middleware is injected in `serve.rs` without touching any application or domain code — this is the correct layer for cross-cutting concerns.
 
 ---
 
