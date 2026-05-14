@@ -88,9 +88,9 @@ cargo run --features http --bin serve
 | `GET` | `/health` | Liveness check |
 | `GET` | `/openapi.json` | Full OpenAPI 3.x spec |
 | `GET` | `/crew-leads` | List all Crew Leads |
-| `POST` | `/crew-leads` | Add a Crew Lead (rejected if count already 3) |
+| `POST` | `/crew-leads` | Add a Crew Lead (**always 409** — cap of 3 is full at boot, use PUT to rotate) |
 | `PUT` | `/crew-leads/{id}` | Replace a Crew Lead (count stays 3) |
-| `DELETE` | `/crew-leads/{id}` | Remove a Crew Lead (always rejected — use replace) |
+| `DELETE` | `/crew-leads/{id}` | Remove a Crew Lead (**always 409** — use PUT to rotate) |
 | `GET` | `/passengers` | List active passengers |
 | `POST` | `/passengers` | Create a passenger (Crew Lead only) |
 | `DELETE` | `/passengers/{id}` | Soft-delete a passenger (Crew Lead only) |
@@ -159,6 +159,7 @@ and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
 | Method | Path                              | Purpose                              |
 | ------ | --------------------------------- | ------------------------------------ |
 | GET    | `/health`                         | liveness probe                       |
+| GET    | `/auth/check`                     | validate bearer token, returns actor ID |
 | GET    | `/health/ready`                   | readiness probe (returns 503 if not ready) |
 | GET    | `/metrics`                        | Prometheus text metrics              |
 | GET    | `/openapi.json`                   | OpenAPI 3.1 document                 |
@@ -180,6 +181,7 @@ and the wire shapes in [`src/interface/dto.rs`](./src/interface/dto.rs).
 | POST   | `/access`                         | attempt access                       |
 | GET    | `/usage`                          | usage event log                      |
 | GET    | `/audit`                          | admin event log                      |
+| GET    | `/audit/verify`                   | verify audit hash chain              |
 | GET    | `/reports/by-tier`                | passenger count per tier             |
 | GET    | `/reports/top-resources?n=…`      | top-N resources by allowed access    |
 | GET    | `/reports/history/:passenger_id`  | personal history                     |
@@ -311,6 +313,12 @@ GitHub Copilot in agent mode was used during development and review
 preparation. It helped most with drafting specs, scaffolding tests,
 boilerplate DTO/handler code, documentation polish, and the code-review
 Q&A guide in [`docs/code-review-qa.md`](./docs/code-review-qa.md).
+Additional reference docs produced with AI assistance:
+[`docs/api-examples.md`](./docs/api-examples.md),
+[`docs/persistence-matrix.md`](./docs/persistence-matrix.md),
+[`docs/observability.md`](./docs/observability.md),
+[`docs/security-review.md`](./docs/security-review.md),
+[`docs/web-reviewer-flow.md`](./docs/web-reviewer-flow.md).
 
 The domain rules, invariants, service boundaries, error mapping, and
 trade-off decisions were reviewed manually against the specs. Suggestions

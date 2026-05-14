@@ -81,27 +81,22 @@ curl http://localhost:8080/crew-leads \
 curl 'http://localhost:8080/crew-leads?limit=2&offset=0' \
   -H 'Authorization: Bearer cl-aria'
 
-# Add a new crew lead  (requires existing crew lead token)
+# POST /crew-leads — always 409 (CL-R2: cap of 3 is full at boot; use PUT to rotate)
 curl -X POST http://localhost:8080/crew-leads \
   -H 'Authorization: Bearer cl-aria' \
   -H 'Content-Type: application/json' \
   -d '{"lead": {"id": "cl-nova", "name": "Nova Chen"}}'
-# → 201  {"id":"cl-nova","name":"Nova Chen"}
+# → 409  {"error": "crew lead limit reached", "code": "CrewLeadLimitReached"}
 
-# Replace a crew lead (swap old-id for a new record)
-curl -X PUT http://localhost:8080/crew-leads/cl-nova \
+# Replace a crew lead (swap old-id for a new record — the only way to change crew leads)
+curl -X PUT http://localhost:8080/crew-leads/cl-jun \
   -H 'Authorization: Bearer cl-aria' \
   -H 'Content-Type: application/json' \
-  -d '{"new_lead": {"id": "cl-nova", "name": "Nova Chen-Updated"}}'
+  -d '{"new_lead": {"id": "cl-jun", "name": "Jun Park-Updated"}}'
 # → 204
 
-# Delete a crew lead
-curl -X DELETE http://localhost:8080/crew-leads/cl-nova \
-  -H 'Authorization: Bearer cl-aria'
-# → 204
-
-# Error: cannot delete the last crew lead (minimum 1 enforced)
-curl -X DELETE http://localhost:8080/crew-leads/cl-aria \
+# DELETE /crew-leads/{id} — always 409 (CL-R3: removal would breach exactly-3 invariant)
+curl -X DELETE http://localhost:8080/crew-leads/cl-jun \
   -H 'Authorization: Bearer cl-aria'
 # → 409  {"error": "crew lead minimum breached", "code": "CrewLeadMinimumBreached"}
 ```
