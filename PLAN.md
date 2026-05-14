@@ -22,9 +22,9 @@ This plan tracks future PRMS Rust slices. Keep changes vertical, spec-backed, an
 
 ## S4 — Web Client Reviewer Flow
 
-- [ ] Add a reviewer script for running the Rust API and React thin client together.
-- [ ] Include seeded state, API key examples, and reset behavior.
-- [ ] Verify with: `cd web && npm ci && npm run build`.
+- [x] Add a reviewer script for running the Rust API and React thin client together.
+- [x] Include seeded state, API key examples, and reset behavior.
+- [x] Verify with: `cd web && npm ci && npm run build`.
 
 ## S5 — Security Hardening Review
 
