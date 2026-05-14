@@ -20,7 +20,7 @@ That's the whole core path — no env vars, no services, no network.
 If `cargo nextest` is not installed, run `cargo install cargo-nextest --locked`
 or use `cargo test` / `cargo test --features http` as the built-in fallback.
 
-For the compact command, domain-rule, and HTTP flag reference, see [CHEATSHEET.md](CHEATSHEET.md).
+For follow-up work and compact references, see [PLAN.md](PLAN.md) and [CHEATSHEET.md](CHEATSHEET.md).
 
 ## Review path
 
