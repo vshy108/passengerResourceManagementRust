@@ -10,9 +10,9 @@ This plan tracks future PRMS Rust slices. Keep changes vertical, spec-backed, an
 
 ## S2 — Persistence Matrix
 
-- [ ] Document which behavior is covered by in-memory, SQLite, and PostgreSQL modes.
-- [ ] Add focused tests for mode-specific failure cases and startup readiness.
-- [ ] Verify with: `cargo nextest run --all-features`.
+- [x] Document which behavior is covered by in-memory, SQLite, and PostgreSQL modes.
+- [x] Add focused tests for mode-specific failure cases and startup readiness.
+- [x] Verify with: `cargo nextest run --all-features`.
 
 ## S3 — Observability Walkthrough
 

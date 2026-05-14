@@ -172,3 +172,31 @@ fn sqlite_usage_sink_records_access_events() {
     let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
     let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
 }
+
+/// `:memory:` `SQLite` always starts as first-run (seeds the demo world) because
+/// in-memory `SQLite` connections do not share state — each `open_db(":memory:")`
+/// call opens a fresh schema with no tables. This is a deliberate tradeoff:
+/// `:memory:` mode is useful for testing the `SQLite` adapters without touching
+/// the filesystem, but mutations do NOT survive a world rebuild. Contrast with
+/// file-backed `SQLite` where `entity_state_survives_restart_via_sqlite` confirms
+/// that mutations persist across rebuilds.
+#[cfg(feature = "http")]
+#[test]
+fn sqlite_memory_db_always_seeds_a_fresh_world() {
+    // Two independent `:memory:` worlds — each gets the full seeded demo state.
+    let world_a = build_world_with_sqlite(":memory:").expect("world A build failed");
+    let world_b = build_world_with_sqlite(":memory:").expect("world B build failed");
+
+    assert_eq!(
+        world_a.passengers.list().len(),
+        3,
+        "world A should have 3 seeded passengers"
+    );
+    assert_eq!(
+        world_b.passengers.list().len(),
+        3,
+        "world B should have 3 seeded passengers"
+    );
+    // No shared state: each world is independent (mutations to world_a do not
+    // affect world_b, unlike file-backed SQLite shared via the same db_path).
+}
