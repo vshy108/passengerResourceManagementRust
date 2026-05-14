@@ -4,9 +4,9 @@ This plan tracks future PRMS Rust slices. Keep changes vertical, spec-backed, an
 
 ## S1 — API Example Collection
 
-- [ ] Add copy/paste HTTP examples for health, crew leads, passengers, resources, access, reports, audit, and reset.
-- [ ] Include required `Authorization: Bearer ...` headers and expected status codes.
-- [ ] Verify against `cargo run --features http --bin serve -- --api-keys ... --enable-reset`.
+- [x] Add copy/paste HTTP examples for health, crew leads, passengers, resources, access, reports, audit, and reset.
+- [x] Include required `Authorization: Bearer ...` headers and expected status codes.
+- [x] Verify against `cargo run --features http --bin serve -- --api-keys ... --enable-reset`.
 
 ## S2 — Persistence Matrix
 
