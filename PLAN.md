@@ -16,9 +16,9 @@ This plan tracks future PRMS Rust slices. Keep changes vertical, spec-backed, an
 
 ## S3 — Observability Walkthrough
 
-- [ ] Document request IDs, log formats, readiness, metrics, and audit verification as one operator path.
-- [ ] Add smoke checks for `/health/ready`, `/metrics`, and `x-request-id` behavior if gaps remain.
-- [ ] Verify with the HTTP feature test suite.
+- [x] Document request IDs, log formats, readiness, metrics, and audit verification as one operator path.
+- [x] Add smoke checks for `/health/ready`, `/metrics`, and `x-request-id` behavior if gaps remain.
+- [x] Verify with the HTTP feature test suite.
 
 ## S4 — Web Client Reviewer Flow
 
