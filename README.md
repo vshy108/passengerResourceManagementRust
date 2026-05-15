@@ -8,6 +8,26 @@ every access attempt, and reporting queries on top.
 The project is spec-driven: every rule in [`specs/`](./specs) maps to one or
 more tests. See [`AGENTS.md`](./AGENTS.md) for the house rules.
 
+## Repo Metadata
+
+- Repo start date: 2026-04-26
+- Related tech stack versions: Rust stable
+
+## Why This Repo Matters
+
+This repo matters because it is the Rust-first full-stack platform proof: Axum backend, React client, auth, metrics, and deployable packaging.
+
+## Proof Map
+
+| Claim | Where to verify |
+|------|-----------------|
+| Roadmap and acceptance checks | [PLAN.md](PLAN.md) |
+| Quick-reference usage patterns | [CHEATSHEET.md](CHEATSHEET.md) |
+| Tests prove the examples and edge cases | [tests/resource.rs](tests/resource.rs) |
+| Supporting docs explain tradeoffs and operations | [docs/security-review.md](docs/security-review.md) |
+| Implementation code shows the working system | [src/interface/mod.rs](src/interface/mod.rs) |
+| Implementation code shows the working system | [web/index.html](web/index.html) |
+
 ## Quick start (reviewers)
 
 ```bash
@@ -260,12 +280,15 @@ A production-ready deployment stack lives in the repository root:
 
 ```bash
 PRMS_DOMAIN=prms.example.com \
+PRMS_CORS_ORIGINS=https://prms.example.com \
 PRMS_API_KEYS="prod-token:cl-aria" \
 docker compose up -d
 ```
 
-Entity state and event logs persist via `PRMS_DB_PATH=/data/prms.db` (uncomment
-the volume in `docker-compose.yml`).
+`docker-compose.yml` intentionally refuses to start unless `PRMS_DOMAIN`,
+`PRMS_CORS_ORIGINS`, and `PRMS_API_KEYS` are set. This prevents accidental
+public deployments with demo bearer tokens or open CORS. Entity state and event
+logs persist via `PRMS_DB_PATH=/data/prms.db` on the `prms-data` named volume.
 
 ## Limitations
 
