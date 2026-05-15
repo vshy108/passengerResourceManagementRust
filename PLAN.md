@@ -31,3 +31,10 @@ This plan tracks future PRMS Rust slices. Keep changes vertical, spec-backed, an
 - [x] Review rate limits, API key parsing, CORS configuration, body limits, and security headers as one slice.
 - [x] Add tests for any missing boundary cases before changing code.
 - [x] Verify with: `cargo clippy --all-targets --all-features -- -D warnings` and `cargo nextest run --features http`.
+
+## S6 — Production Compose Guardrails
+
+- [x] Remove demo bearer tokens from `docker-compose.yml` and require operator-supplied `PRMS_API_KEYS`.
+- [x] Require explicit `PRMS_DOMAIN` and `PRMS_CORS_ORIGINS` so compose deployments cannot silently run with localhost TLS/open CORS assumptions.
+- [x] Enable the `/data/prms.db` named volume by default so compose does not fall back to in-memory demo mode.
+- [x] Verify with: `PRMS_DOMAIN=prms.example.com PRMS_CORS_ORIGINS=https://prms.example.com PRMS_API_KEYS=prod-token:cl-aria docker compose config`.

@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   prms:
     build:
@@ -7,21 +5,23 @@ services:
       dockerfile: Dockerfile
     image: prms:latest
     # FIX: bind to 127.0.0.1 only — Caddy is the sole external entry point.
-    # Exposing 8080 directly to the host bypasses TLS and the rate-limiter
-    # middleware that is only applied in the production binary.
+    # Exposing 8080 directly to the host bypasses TLS/reverse-proxy handling.
     # Remove this ports block entirely in production; keep for local dev only.
     ports:
       - "127.0.0.1:8080:8080"
     environment:
-      # REQUIRED: set real tokens before deploying.
-      PRMS_API_KEYS: "crew-lead-token:cl-aria,passenger-token:ps-001"
-      # REQUIRED for Caddy HTTPS: set your public hostname.
-      # PRMS_CORS_ORIGINS must match this domain (no trailing slash).
-      # PRMS_CORS_ORIGINS: "https://prms.example.com"
-      # Optional: persist events to a named volume.
-      # PRMS_DB_PATH: /data/prms.db
-    # volumes:
-    #   - prms-data:/data
+      # FIX: demo bearer tokens in compose make accidental public deployments
+      # authenticate with known credentials. Require operator-supplied tokens.
+      PRMS_API_KEYS: "${PRMS_API_KEYS:?Set PRMS_API_KEYS to comma-separated token:actor-id pairs}"
+      # FIX: open CORS defaults are fine for local cargo runs, but compose is
+      # the production path. Require an explicit HTTPS origin before startup.
+      PRMS_CORS_ORIGINS: "${PRMS_CORS_ORIGINS:?Set PRMS_CORS_ORIGINS to https://your.domain}"
+      # Persist entity snapshots and event logs instead of silently running in
+      # in-memory demo mode when compose is used as the deployment entry point.
+      PRMS_DB_PATH: /data/prms.db
+      PRMS_ENABLE_RATE_LIMIT: "true"
+    volumes:
+      - prms-data:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
@@ -38,9 +38,9 @@ services:
       - "443:443"
       - "443:443/udp"   # HTTP/3 (QUIC)
     environment:
-      # Set this to your public hostname (e.g. prms.example.com).
-      # Caddy uses it for automatic Let's Encrypt certificate acquisition.
-      PRMS_DOMAIN: "${PRMS_DOMAIN:-localhost}"
+      # FIX: defaulting to localhost silently disables the intended public TLS
+      # posture. Require the real hostname for compose deployments.
+      PRMS_DOMAIN: "${PRMS_DOMAIN:?Set PRMS_DOMAIN to your public hostname}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -51,5 +51,4 @@ services:
 volumes:
   caddy-data:
   caddy-config:
-# volumes:
-#   prms-data:
+  prms-data:
