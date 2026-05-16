@@ -75,6 +75,14 @@ No automated tests: PostgreSQL requires a live connection pool (`PRMS_PG_URL`)
 which is not available in CI without a sidecar container. The implementation
 mirrors the SQLite store (`pg_store.rs`) and is gated behind `--features postgres`.
 
+Repeatable smoke test (starts a temporary PostgreSQL container, runs the HTTP server
+with `--features postgres`, writes a passenger, records allowed and denied access,
+checks `/health/ready`, and verifies the audit chain):
+
+```sh
+scripts/postgres-smoke.sh
+```
+
 Manual smoke test (requires a running PostgreSQL instance):
 
 ```sh

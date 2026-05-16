@@ -143,6 +143,16 @@ All flags also read from the matching environment variable:
 | `--log-format`          | `PRMS_LOG_FORMAT`          | `text`             | `text` (human) or `json` (newline-delimited JSON for Loki/Datadog/CloudWatch). |
 | `RUST_LOG`              | _(env only)_               | `info`             | tracing-subscriber filter                            |
 
+For a repeatable local PostgreSQL smoke, run:
+
+```sh
+scripts/postgres-smoke.sh
+```
+
+The smoke starts a temporary `postgres:18-alpine` container, launches the API
+with `--features postgres`, waits for `/health/ready`, writes a passenger,
+records allowed and denied access attempts, and verifies the audit hash chain.
+
 Every response carries an `x-request-id` header (UUID-v4 if the client
 did not supply one) so logs can be correlated. The full OpenAPI 3.1
 spec is served at `GET /openapi.json` — point Swagger UI / Redoc /

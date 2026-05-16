@@ -57,9 +57,9 @@ the loopback IP and would exhaust the token bucket immediately:
 
 ```sh
 # Local dev — disable rate limiting
-cargo run --features http --bin serve -- \
+PRMS_ENABLE_RATE_LIMIT=false cargo run --features http --bin serve -- \
   --api-keys '...' \
-  --enable-rate-limit=false
+  --enable-reset
 
 # Or via dev.env (already sets PRMS_ENABLE_RATE_LIMIT=false)
 env $(grep -v '^#' dev.env | xargs) cargo run --features http --bin serve -- --enable-reset

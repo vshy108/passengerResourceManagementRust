@@ -11,6 +11,7 @@ cargo test --features http
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo llvm-cov nextest --features http --ignore-filename-regex 'src/bin/'
+scripts/postgres-smoke.sh
 ```
 
 Run the HTTP server:
@@ -21,10 +22,9 @@ env $(grep -v '^#' dev.env | xargs) \
   cargo run --features http --bin serve -- --enable-reset
 
 # Or inline:
-cargo run --features http --bin serve -- \
+PRMS_ENABLE_RATE_LIMIT=false cargo run --features http --bin serve -- \
   --api-keys 'cl-aria:cl-aria,ps-001:ps-001' \
-  --enable-reset \
-  --enable-rate-limit=false
+  --enable-reset
 ```
 
 ## Domain Rules
@@ -65,6 +65,17 @@ interface -> application -> domain
 | `--rate-limit-burst` | `PRMS_RATE_LIMIT_BURST` | `50` | Initial token burst per IP |
 | `--shutdown-grace-secs` | `PRMS_SHUTDOWN_GRACE_SECS` | `10` | Drain timeout after SIGINT |
 | `--log-format` | `PRMS_LOG_FORMAT` | `text` | `text` or `json` structured logs |
+
+## PostgreSQL Smoke
+
+```sh
+scripts/postgres-smoke.sh
+```
+
+The script starts a temporary `postgres:18-alpine` container, runs the API with
+`--features postgres`, waits for `/health/ready`, creates a passenger, records
+allowed and denied access attempts, verifies the audit hash chain, and prints a
+small timing/evidence report.
 
 ## Review Gates
 
