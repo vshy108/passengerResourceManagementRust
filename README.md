@@ -11,22 +11,35 @@ more tests. See [`AGENTS.md`](./AGENTS.md) for the house rules.
 ## Repo Metadata
 
 - Repo start date: 2026-04-26
-- Related tech stack versions: Rust stable
+- Related tech stack: Rust stable · Axum · React · PostgreSQL · Docker
 
 ## Why This Repo Matters
 
-This repo matters because it is the Rust-first full-stack platform proof: Axum backend, React client, auth, metrics, and deployable packaging.
+This is the primary full-stack Rust proof: a spec-driven domain layer, an Axum HTTP adapter, a React thin client, PostgreSQL + SQLite persistence, bearer token auth, per-IP rate limiting, audit trail, and Docker packaging — all in one repo.
+
+Every feature claim maps to a runnable test or a curl-verifiable endpoint. The architecture enforces strict dependency direction (`interface → application → domain`) so the core logic is testable without a running server, database, or network.
+
+```
+cargo nextest run                  # 100+ tests, no network, no services
+cargo nextest run --features http  # adds the Axum HTTP adapter suite
+```
 
 ## Proof Map
 
 | Claim | Where to verify |
 |------|-----------------|
+| Spec-driven domain rules (tier policy, access, audit) | [`specs/`](specs/) — 7 numbered spec files |
+| Tests prove every spec rule | [`tests/`](tests/) — one integration file per spec slice |
+| Layered Rust architecture (domain / application / infrastructure / interface) | [`src/`](src/) — dependency direction is inward only |
+| Axum HTTP adapter with 28 JSON endpoints | [`src/interface/http.rs`](src/interface/http.rs) |
+| Bearer token auth + per-IP rate limiting | [`src/interface/http.rs`](src/interface/http.rs) · [`docs/security-review.md`](docs/security-review.md) |
+| PostgreSQL persistence (+ SQLite fallback) | [`--pg-url` flag](README.md#configuration) · [`scripts/postgres-smoke.sh`](scripts/postgres-smoke.sh) |
+| React thin client (fetches all data from Rust backend) | [`web/`](web/) · [`web/README.md`](web/README.md) |
+| Docker packaging | [`Dockerfile`](Dockerfile) · [`docker-compose.yml`](docker-compose.yml) |
+| Audit trail of all admin changes | [`specs/06-audit.md`](specs/06-audit.md) · [`tests/audit.rs`](tests/audit.rs) |
+| Reporting queries across tiers | [`specs/07-reporting.md`](specs/07-reporting.md) · [`tests/reporting.rs`](tests/reporting.rs) |
 | Roadmap and acceptance checks | [PLAN.md](PLAN.md) |
 | Quick-reference usage patterns | [CHEATSHEET.md](CHEATSHEET.md) |
-| Tests prove the examples and edge cases | [tests/resource.rs](tests/resource.rs) |
-| Supporting docs explain tradeoffs and operations | [docs/security-review.md](docs/security-review.md) |
-| Implementation code shows the working system | [src/interface/mod.rs](src/interface/mod.rs) |
-| Implementation code shows the working system | [web/index.html](web/index.html) |
 
 ## Quick start (reviewers)
 
