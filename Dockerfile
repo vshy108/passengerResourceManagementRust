@@ -19,9 +19,15 @@ RUN mkdir -p src/bin && \
 
 # Now copy the real source and do the final build.
 COPY src ./src
-# Touch serve.rs so cargo notices the source changed (dummy artefact above
-# has the same mtime as the dependency-cache build).
-RUN touch src/bin/serve.rs && \
+# pg_store.rs embeds migrations/001_initial.sql via include_str! at compile time.
+# The path resolves relative to the workspace root (/app), so the directory
+# must be present before cargo builds the postgres feature.
+COPY migrations ./migrations
+# Touch all source files so cargo sees them as newer than the dummy lib
+# artifact built above. `touch src/bin/serve.rs` alone is not enough —
+# the lib (src/lib.rs) must also be marked changed or cargo reuses the
+# placeholder artifact that has no `interface` module.
+RUN find src -name "*.rs" -exec touch {} + && \
     cargo build --release --features http,postgres --bin serve
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
