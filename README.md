@@ -38,6 +38,7 @@ cargo nextest run --features http  # adds the Axum HTTP adapter suite
 | Docker packaging | [`Dockerfile`](Dockerfile) · [`docker-compose.yml`](docker-compose.yml) |
 | Audit trail of all admin changes | [`specs/06-audit.md`](specs/06-audit.md) · [`tests/audit.rs`](tests/audit.rs) |
 | Reporting queries across tiers | [`specs/07-reporting.md`](specs/07-reporting.md) · [`tests/reporting.rs`](tests/reporting.rs) |
+| k6 load test (50 VUs · 68.7 req/s · p(95) 0.627 ms · 0.19% errors) | [`k6/passenger_load.js`](k6/passenger_load.js) · [`docs/k6-load-report.md`](docs/k6-load-report.md) |
 | Roadmap and acceptance checks | [PLAN.md](PLAN.md) |
 | Quick-reference usage patterns | [CHEATSHEET.md](CHEATSHEET.md) |
 

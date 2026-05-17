@@ -45,3 +45,12 @@ This plan tracks future PRMS Rust slices. Keep changes vertical, spec-backed, an
 - [x] Exercise a write path, allowed access, denied access, and audit verification against the Postgres-backed server.
 - [x] Print timing and evidence output so the smoke can be attached to future deployment or persistence reviews.
 - [x] Verify with: `bash -n scripts/postgres-smoke.sh`, `cargo check --features postgres`, and `git diff --check`.
+
+## S8 — k6 Load Test Evidence
+
+- [x] Add `k6/passenger_load.js` — write+read cycle with stable per-VU passenger IDs (bounds DB flushes to N_VUs total; subsequent POSTs return 409 without flush).
+- [x] Add `docker-compose.loadtest.yml` override — disables rate limiting for the load run.
+- [x] Add `scripts/k6_load_test.sh` — tears down leftover state, starts compose, waits for `/health/ready`, runs k6, saves Markdown report to `docs/k6-load-report.md`, then tears down.
+- [x] Add `load-test` target to `Makefile`.
+- [x] Run and capture results: **2,570 iterations in 45 s · 34.3 iter/s · 68.7 req/s · p(95) 0.627 ms · 0.19% errors** (all thresholds ✅).
+- [x] Save report to `docs/k6-load-report.md`.

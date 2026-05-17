@@ -1,0 +1,6 @@
+services:
+  prms:
+    environment:
+      # Disable per-IP rate limiting for load tests so the single localhost
+      # address does not hit the rate limit bucket and skew results.
+      PRMS_ENABLE_RATE_LIMIT: "false"
