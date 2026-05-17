@@ -31,7 +31,7 @@ utoipa = { version = "5", features = ["axum_extras"], optional = true }
 # SQLite adapter — `bundled` compiles the SQLite amalgamation from source,
 # eliminating the system-SQLite dependency. Part of the `http` feature
 # so the domain/application layers stay I/O-free.
-rusqlite = { version = "0.31", features = ["bundled"], optional = true }
+rusqlite = { version = "0.39", features = ["bundled"], optional = true }
 tower = { version = "0.5", features = ["util"], optional = true }
 tower_governor = { version = "0.8.0", features = ["axum"], optional = true }
 # Constant-time byte comparison for bearer token validation (OWASP A07).
