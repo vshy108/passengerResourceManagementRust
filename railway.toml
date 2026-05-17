@@ -1,0 +1,32 @@
+# Railway deployment configuration for passenger-resource-management (Rust).
+# https://docs.railway.com/reference/config-as-code
+#
+# Setup on Railway dashboard:
+#   1. New Project → Deploy from GitHub → select this repo
+#   2. Add a PostgreSQL plugin → DATABASE_URL is injected automatically
+#      (the app maps DATABASE_URL → PRMS_PG_URL at startup)
+#   3. Set environment variables (see below)
+#   4. Railway detects the Dockerfile and builds automatically
+#
+# Required env vars (set in Railway dashboard → service → Variables):
+#   PRMS_API_KEYS    comma-separated token:actor-id pairs
+#                    e.g. "secret123:cl-aria,secret456:ps-001"
+#                    (all authenticated endpoints return 401 when unset)
+#
+# Optional env vars:
+#   PRMS_PG_URL      override the DATABASE_URL mapping if needed
+#   PRMS_CORS_ORIGINS  comma-separated allowed origins (any origin when unset)
+#   PRMS_LOG_FORMAT  "text" (default) or "json"
+#   PRMS_RATE_LIMIT_RPS / PRMS_RATE_LIMIT_BURST  rate limiter tuning
+#
+# PORT and DATABASE_URL are injected by Railway automatically.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health/ready"
+healthcheckTimeout = 60
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

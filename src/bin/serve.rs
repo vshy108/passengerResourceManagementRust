@@ -169,8 +169,15 @@ async fn main() -> ExitCode {
         }
     };
 
-    // Priority: PRMS_PG_URL → PRMS_DB_PATH → in-memory demo world.
-    let world = if let Some(pg_url) = args.pg_url.as_deref() {
+    // Priority: PRMS_PG_URL (or DATABASE_URL fallback) → PRMS_DB_PATH → in-memory demo world.
+    // FIX: Railway injects DATABASE_URL from its Postgres plugin. PRMS_PG_URL takes
+    // priority when set explicitly; DATABASE_URL is the fallback so no extra dashboard
+    // variable is needed beyond what Railway wires automatically.
+    let effective_pg_url = args
+        .pg_url
+        .clone()
+        .or_else(|| std::env::var("DATABASE_URL").ok());
+    let world = if let Some(pg_url) = effective_pg_url.as_deref() {
         #[cfg(not(feature = "postgres"))]
         {
             eprintln!(
@@ -265,7 +272,18 @@ async fn main() -> ExitCode {
         );
     }
 
-    let addr = args.bind;
+    // FIX: Railway (and most PaaS platforms) inject PORT as a bare port number,
+    // not a full SocketAddr. When PRMS_BIND is not set explicitly, derive the bind
+    // address from PORT so the app listens on all interfaces at Railway's assigned
+    // port. 127.0.0.1 (the clap default) is unreachable from Railway's proxy.
+    let addr: SocketAddr = if std::env::var("PRMS_BIND").is_err() {
+        std::env::var("PORT")
+            .ok()
+            .and_then(|p| format!("0.0.0.0:{p}").parse().ok())
+            .unwrap_or(args.bind)
+    } else {
+        args.bind
+    };
     // `.await` suspends the async function until the future completes.
     // Only legal inside `async fn` / async blocks.
     let listener = match tokio::net::TcpListener::bind(addr).await {
