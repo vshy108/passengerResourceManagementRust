@@ -1,4 +1,19 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: prms
+      POSTGRES_PASSWORD: prms
+      POSTGRES_DB: prms
+    volumes:
+      - prms-db:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prms"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   prms:
     build:
       context: .
@@ -16,19 +31,21 @@ services:
       # FIX: open CORS defaults are fine for local cargo runs, but compose is
       # the production path. Require an explicit HTTPS origin before startup.
       PRMS_CORS_ORIGINS: "${PRMS_CORS_ORIGINS:?Set PRMS_CORS_ORIGINS to https://your.domain}"
-      # Persist entity snapshots and event logs instead of silently running in
-      # in-memory demo mode when compose is used as the deployment entry point.
-      PRMS_DB_PATH: /data/prms.db
+      # PostgreSQL is the default persistence backend when running via compose.
+      # To use SQLite instead, remove PRMS_PG_URL and set PRMS_DB_PATH=/data/prms.db
+      # (and add `volumes: [prms-data:/data]` to this service).
+      PRMS_PG_URL: postgres://prms:prms@postgres:5432/prms?sslmode=disable
       PRMS_ENABLE_RATE_LIMIT: "true"
-    volumes:
-      - prms-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
 
   caddy:
     image: caddy:2-alpine
@@ -51,4 +68,4 @@ services:
 volumes:
   caddy-data:
   caddy-config:
-  prms-data:
+  prms-db:
