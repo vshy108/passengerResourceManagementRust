@@ -35,7 +35,7 @@ cargo nextest run --features http  # adds the Axum HTTP adapter suite
 | Bearer token auth + per-IP rate limiting | [`src/interface/http.rs`](src/interface/http.rs) · [`docs/security-review.md`](docs/security-review.md) |
 | PostgreSQL persistence (+ SQLite fallback) | [`--pg-url` flag](README.md#configuration) · [`scripts/postgres-smoke.sh`](scripts/postgres-smoke.sh) |
 | React thin client (fetches all data from Rust backend) | [`web/`](web/) · [`web/README.md`](web/README.md) |
-| Docker packaging | [`Dockerfile`](Dockerfile) · [`docker-compose.yml`](docker-compose.yml) |
+| Docker packaging + published image | [`Dockerfile`](Dockerfile) · [`docker-compose.yml`](docker-compose.yml) · [`ghcr.io/vshy108/passengerresourcemanagementrust`](https://github.com/vshy108/passengerResourceManagementRust/pkgs/container/passengerresourcemanagementrust) · [`.github/workflows/publish.yml`](.github/workflows/publish.yml) |
 | Audit trail of all admin changes | [`specs/06-audit.md`](specs/06-audit.md) · [`tests/audit.rs`](tests/audit.rs) |
 | Reporting queries across tiers | [`specs/07-reporting.md`](specs/07-reporting.md) · [`tests/reporting.rs`](tests/reporting.rs) |
 | k6 load test (50 VUs · 68.7 req/s · p(95) 0.627 ms · 0.19% errors) | [`k6/passenger_load.js`](k6/passenger_load.js) · [`docs/k6-load-report.md`](docs/k6-load-report.md) |
@@ -301,6 +301,33 @@ A production-ready deployment stack lives in the repository root:
   `127.0.0.1` inside the Docker network; Caddy is the sole external entry point.
 - **`Caddyfile`** — Caddy reverse-proxy with automatic Let's Encrypt TLS.
   Set `PRMS_DOMAIN=your.domain` and Caddy handles certificate acquisition and renewal.
+- **`.github/workflows/publish.yml`** — publishes `ghcr.io/vshy108/passengerresourcemanagementrust:latest`
+  to GitHub Container Registry on every push to `main`. Uses Docker Buildx layer caching.
+
+### Published Docker image
+
+The image is built with `--features http,postgres` and published automatically on every merge to `main`:
+
+```bash
+# Pull and run against an existing PostgreSQL instance
+docker run --rm \
+  -e PRMS_API_KEYS='your-token:cl-aria' \
+  -e PRMS_CORS_ORIGINS='http://localhost' \
+  -e PRMS_BIND='0.0.0.0:8080' \
+  -e PRMS_PG_URL='postgres://user:pass@host:5432/prms?sslmode=disable' \
+  -p 8080:8080 \
+  ghcr.io/vshy108/passengerresourcemanagementrust:latest
+
+# Run in in-memory demo mode (no persistence)
+docker run --rm \
+  -e PRMS_API_KEYS='demo-token:cl-aria' \
+  -e PRMS_CORS_ORIGINS='http://localhost' \
+  -e PRMS_BIND='0.0.0.0:8080' \
+  -p 8080:8080 \
+  ghcr.io/vshy108/passengerresourcemanagementrust:latest
+```
+
+### Compose with TLS
 
 ```bash
 PRMS_DOMAIN=prms.example.com \

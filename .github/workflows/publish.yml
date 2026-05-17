@@ -1,0 +1,64 @@
+name: publish
+
+# Build and push the Docker image to GitHub Container Registry (ghcr.io)
+# on every push to main. The image can be pulled and run anywhere with:
+#
+#   docker run --rm \
+#     -e PRMS_API_KEYS='token:actor-id' \
+#     -e PRMS_CORS_ORIGINS='http://localhost' \
+#     -e PRMS_BIND='0.0.0.0:8080' \
+#     -p 8080:8080 \
+#     ghcr.io/vshy108/passengerresourcemanagementrust:latest
+#
+# For PostgreSQL-backed mode also pass --PRMS_PG_URL.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write   # required to push to ghcr.io
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Cache layers between runs via GitHub Actions cache backend.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

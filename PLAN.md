@@ -54,3 +54,9 @@ This plan tracks future PRMS Rust slices. Keep changes vertical, spec-backed, an
 - [x] Add `load-test` target to `Makefile`.
 - [x] Run and capture results: **2,570 iterations in 45 s · 34.3 iter/s · 68.7 req/s · p(95) 0.627 ms · 0.19% errors** (all thresholds ✅).
 - [x] Save report to `docs/k6-load-report.md`.
+
+## S9 — Published Docker Image (ghcr.io)
+
+- [x] Add `.github/workflows/publish.yml` — builds `ghcr.io/vshy108/passengerresourcemanagementrust:latest` with `--features http,postgres` on every push to `main` using Docker Buildx + GHA cache.
+- [x] Update `README.md` — document `docker run` usage for both PostgreSQL-backed and in-memory demo modes, and add published image row to the proof table.
+- [x] Verify: `bash -n .github/workflows/publish.yml` (syntax OK).
