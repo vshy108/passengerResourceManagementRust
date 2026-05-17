@@ -44,7 +44,7 @@ subtle = { version = "2", optional = true }
 # sqlx-sqlite, which conflicts with rusqlite's libsqlite3-sys link dependency.
 sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls"], optional = true }
 # SHA-256 hashing for the tamper-evident audit log hash chain.
-sha2 = { version = "0.10", optional = true }
+sha2 = { version = "0.11", optional = true }
 # Hex encoding for SHA-256 digests stored/compared as strings.
 hex = { version = "0.4", optional = true }
 
