@@ -22,8 +22,9 @@ services:
     # FIX: bind to 127.0.0.1 only — Caddy is the sole external entry point.
     # Exposing 8080 directly to the host bypasses TLS/reverse-proxy handling.
     # Remove this ports block entirely in production; keep for local dev only.
+    # Override PRMS_HOST_PORT (default 8080) when the port is already in use locally.
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${PRMS_HOST_PORT:-8080}:8080"
     environment:
       # FIX: demo bearer tokens in compose make accidental public deployments
       # authenticate with known credentials. Require operator-supplied tokens.
