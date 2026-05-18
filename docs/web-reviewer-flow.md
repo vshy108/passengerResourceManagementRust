@@ -3,6 +3,8 @@
 Step-by-step guide to running the Rust API and the React thin client
 side-by-side, with seeded state, API key examples, and reset behavior.
 
+Latest local evidence: [`reviewer-flow-evidence-2026-05-18.md`](./reviewer-flow-evidence-2026-05-18.md).
+
 ---
 
 ## Prerequisites
