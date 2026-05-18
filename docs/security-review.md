@@ -4,6 +4,8 @@ Covers rate limiting, API key parsing, CORS, body limits, and security
 response headers. Every finding includes the relevant OWASP Top 10 category,
 the implementation location, and the test that verifies the behavior.
 
+Latest local evidence: [`security-hardening-evidence-2026-05-18.md`](./security-hardening-evidence-2026-05-18.md).
+
 ---
 
 ## Summary
